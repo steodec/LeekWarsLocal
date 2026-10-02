@@ -1,0 +1,62 @@
+# Construit l'installeur Windows signé et le publie en release GitHub.
+# - pull request : build seul (vérifie que tout compile) ;
+# - push sur main : si la release v<version de package.json> n'existe pas encore, build + release.
+#   Pour publier : `npm run release -- patch|minor|major` (incrémente la version, commit, push).
+name: Release
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # historique et tags pour les notes de release
+
+      - name: Version à publier
+        id: version
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          publish=false
+          if [ "${{ github.event_name }}" != "pull_request" ] && ! gh release view "v$version" >/dev/null 2>&1; then publish=true; fi
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "Version $version — publication : $publish"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      - name: Build de l'installeur (signé)
+        run: npm run build:app
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+
+      - name: Publication de la release
+        if: steps.version.outputs.publish == 'true'
+        run: node scripts/publish-release.mjs

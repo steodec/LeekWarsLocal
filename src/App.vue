@@ -11,6 +11,8 @@ import Characteristics from "./views/Characteristics.vue";
 import Leeks from "./views/Leeks.vue";
 import Settings from "./views/Settings.vue";
 import JobsPanel from "./components/JobsPanel.vue";
+import UpdateBanner from "./components/UpdateBanner.vue";
+import { startUpdateChecks } from "./updater";
 import LeekImage from "./components/LeekImage.vue";
 import { lwImage } from "./lw";
 
@@ -87,6 +89,7 @@ async function syncNow() {
 onMounted(() => {
   refreshStatus();
   refreshJobs();
+  startUpdateChecks();
 });
 </script>
 
@@ -140,6 +143,7 @@ onMounted(() => {
   </header>
 
   <main>
+    <UpdateBanner />
     <div v-if="state.needsApiKey && view.name !== 'settings'" class="card setup">
       <b>Bienvenue !</b> Pour commencer, renseignez votre clé API Leek Wars.
       <a class="btn" href="#/settings">Configurer la clé API →</a>

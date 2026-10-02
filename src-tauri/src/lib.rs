@@ -22,7 +22,11 @@ fn start_server(app: &tauri::App) -> Option<Child> {
         return None;
     }
     let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
-    let server = exe_dir.join(if cfg!(windows) { "leekwars-server.exe" } else { "leekwars-server" });
+    let server = exe_dir.join(if cfg!(windows) {
+        "leekwars-server.exe"
+    } else {
+        "leekwars-server"
+    });
     if !server.exists() {
         eprintln!("Serveur embarqué introuvable : {}", server.display());
         return None;
@@ -32,14 +36,19 @@ fn start_server(app: &tauri::App) -> Option<Child> {
     std::fs::create_dir_all(&data_dir).ok()?;
 
     let mut cmd = Command::new(&server);
-    cmd.env("LWL_DATA_DIR", &data_dir).env("LWL_ROOT", &data_dir).current_dir(&data_dir);
+    cmd.env("LWL_DATA_DIR", &data_dir)
+        .env("LWL_ROOT", &data_dir)
+        .current_dir(&data_dir);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
-    let child = cmd.spawn().map_err(|e| eprintln!("Lancement du serveur impossible : {e}")).ok()?;
+    let child = cmd
+        .spawn()
+        .map_err(|e| eprintln!("Lancement du serveur impossible : {e}"))
+        .ok()?;
 
     // Attend que le serveur réponde pour que l'interface ne démarre pas sur une erreur.
     let start = Instant::now();
@@ -49,10 +58,24 @@ fn start_server(app: &tauri::App) -> Option<Child> {
     Some(child)
 }
 
+/// Arrête le serveur embarqué. Appelé par l'interface avant d'installer une mise à jour :
+/// sous Windows l'updater quitte l'appli sans `RunEvent::Exit`, et l'installeur doit pouvoir
+/// remplacer `leekwars-server.exe`.
+#[tauri::command]
+fn stop_server(state: tauri::State<ServerProcess>) {
+    if let Some(mut child) = state.0.lock().unwrap().take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
+        .invoke_handler(tauri::generate_handler![stop_server])
         .setup(|app| {
             let child = start_server(app);
             app.manage(ServerProcess(Mutex::new(child)));

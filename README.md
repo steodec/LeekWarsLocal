@@ -1,5 +1,8 @@
 # LeekWars Local
 
+**[⬇ Télécharger LeekWars Local pour Windows](https://github.com/steodec/LeekWarsLocal/releases/latest/download/LeekWarsLocal-setup.exe)**
+· [toutes les versions](https://github.com/steodec/LeekWarsLocal/releases)
+
 Interface locale pour **gérer, lancer et analyser** ses combats Leek Wars, avec une **API REST locale**
 utilisable depuis l'interface, un script, ou Claude.
 
@@ -41,6 +44,26 @@ Il installe l'application pour l'utilisateur courant (sans droits admin) et WebV
 - Les données vont dans `%APPDATA%\com.steodec.leekwarslocal\` (base `leekwars.db`), comme avec `npm run server` : une seule base quel que soit le serveur lancé. Une ancienne
   base `data/leekwars.db` du projet y est fusionnée une fois au démarrage. Chaque utilisateur saisit **sa** clé API dans Paramètres.
 - L'exécutable n'est pas signé : Windows SmartScreen peut afficher « Windows a protégé votre ordinateur » → « Informations complémentaires » → « Exécuter quand même ».
+
+## Mises à jour
+
+- **Application installée** : elle vérifie les mises à jour au démarrage puis toutes les 6 h ; une bannière propose
+  « Mettre à jour et redémarrer » (aussi dans Paramètres → Mises à jour). Les mises à jour sont signées (plugin updater Tauri) :
+  une version non signée par notre clé est refusée. Une version antérieure à 0.3.0 doit être réinstallée une fois à la main.
+- **Copie de travail** (`npm run server`) : `npm run update` fait `git pull --ff-only`, `npm install` si les dépendances ont changé,
+  puis reconstruit l'interface. Redémarrer ensuite le serveur.
+- **Publier une version** :
+
+  ```bash
+  npm run release -- minor          # ou patch, major, 1.2.3
+  ```
+
+  Incrémente la version partout, commit « Version X.Y.Z » et push. Le workflow GitHub Actions `.github/workflows/release.yml`
+  construit alors l'installeur signé sur `windows-latest` et crée la release `vX.Y.Z` (installeur, `.sig`, `latest.json` lu par
+  l'updater, et `LeekWarsLocal-setup.exe` pour le lien de téléchargement stable). Il ne publie que si la release de la version de
+  `package.json` n'existe pas encore ; sur une pull request il se contente de construire.
+- **Clé de signature** : secret `TAURI_SIGNING_PRIVATE_KEY` du dépôt, copie locale `~/.tauri/leekwarslocal.key`. **À sauvegarder** :
+  sans elle, plus aucune mise à jour ne peut être publiée pour les applis déjà installées. Ne jamais la committer.
 
 ## Ce que fait l'interface
 

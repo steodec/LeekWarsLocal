@@ -1,7 +1,7 @@
 {
   "name": "leekwarslocal",
   "private": true,
-  "version": "0.2.2",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -13,11 +13,15 @@
     "tauri:dev": "tauri dev",
     "build:server": "node scripts/build-server.mjs",
     "build:app": "tauri build",
-    "assets": "node scripts/fetch-lw-assets.mjs"
+    "assets": "node scripts/fetch-lw-assets.mjs",
+    "update": "node scripts/update.mjs",
+    "release": "node scripts/release.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-process": "^2.4.0",
+    "@tauri-apps/plugin-updater": "^2.13.1",
     "vue": "^3.5.13"
   },
   "devDependencies": {

@@ -1,6 +1,6 @@
 // Client de l'API locale (server/index.js). En dev, Vite proxifie /api vers :3737.
 // Dans Tauri (origine tauri:// ou http://tauri.localhost sous Windows), on vise directement le serveur local lancé par l'application.
-const inTauri =
+export const inTauri =
   typeof window !== "undefined" &&
   ("__TAURI_INTERNALS__" in window || window.location.hostname === "tauri.localhost" || !window.location.protocol.startsWith("http"));
 const BASE = inTauri ? "http://127.0.0.1:3737" : "";
