@@ -10,7 +10,10 @@ interface Stat {
   base: number; added: number; equipment: number; current: number; total: number; capitalInvested: number;
   bonus: number; bonusCost: number; bonusValid: boolean; after: number;
   next: { sup: number; capital: number } | null; prev: { sup: number; capital: number } | null;
+  adds: Record<string, { bonus: number; gain: number; capital: number } | null>;
 }
+// Montants de capital des boutons, comme dans Leek Wars.
+const STEPS = [1, 10, 100];
 interface View { owned: boolean; leekId: number; name: string; level: number; capital: number; totalCapital: number; planned: number; remaining: number; valid: boolean; stats: Record<string, Stat> }
 
 const LABELS: Record<string, string> = {
@@ -46,15 +49,38 @@ async function load() {
 watch(() => [state.leekId, state.dataVersion], load, { immediate: true });
 
 let timer: number | undefined;
-function preview() {
+function preview(spend?: Record<string, number>) {
   clearTimeout(timer);
   timer = window.setTimeout(async () => {
     try {
-      view.value = await api.post(`/api/leeks/${state.leekId}/characteristics/preview`, { bonuses: { ...bonuses } });
+      view.value = await api.post(`/api/leeks/${state.leekId}/characteristics/preview`, { bonuses: { ...bonuses }, spend });
+      // Le serveur a converti le capital saisi en points : on reprend ses valeurs.
+      if (spend) for (const c of Object.keys(spend)) bonuses[c] = view.value!.stats[c]?.bonus ?? 0;
     } catch (e: any) {
       error.value = e.message;
     }
-  }, 120);
+  }, spend ? 0 : 120);
+}
+
+// Bouton +1 / +10 / +100 : dépense jusqu'à N capital de plus, aux paliers en vigueur.
+function addCapital(c: string, n: number) {
+  const a = view.value?.stats[c]?.adds?.[n];
+  if (!a) return;
+  bonuses[c] = a.bonus;
+  confirming.value = false;
+  preview();
+}
+
+// Montant libre : capital à dépenser sur cette caractéristique (converti en points par le serveur).
+function setCapital(c: string, e: Event) {
+  const input = e.target as HTMLInputElement;
+  const s = view.value?.stats[c];
+  if (!s) return;
+  const max = s.bonusCost + Math.max(0, view.value!.remaining);
+  const v = Math.min(max, Math.max(0, Math.floor(Number(input.value) || 0)));
+  input.value = String(v);
+  confirming.value = false;
+  preview({ [c]: v });
 }
 
 // Applique un achat (ou un retrait) au palier courant, puis le serveur recalcule coûts et paliers suivants.
@@ -80,10 +106,6 @@ function reset() {
 }
 
 const changes = computed(() => Object.entries(view.value?.stats ?? {}).filter(([, s]) => s.bonus > 0));
-const canAdd = (c: string) => {
-  const s = view.value?.stats[c];
-  return !!view.value?.owned && !!s?.next && (view.value?.remaining ?? 0) >= s.next.capital;
-};
 
 async function validate() {
   busy.value = true;
@@ -134,6 +156,7 @@ async function validate() {
               <th class="num">Équipement</th>
               <th class="num">Total actuel</th>
               <template v-if="view.owned">
+                <th>Capital à dépenser</th>
                 <th class="num">Ajout prévu</th>
                 <th class="num">Après</th>
                 <th class="num">Prochain achat</th>
@@ -156,13 +179,31 @@ async function validate() {
               <td class="num">{{ s.equipment ? "+" + fmtNum(s.equipment) : "–" }}</td>
               <td class="num"><b class="display total" :style="{ color: `var(--stat-${c})` }">{{ fmtNum(s.total) }}</b></td>
               <template v-if="view.owned">
-              <td class="num">
-                <div class="stepper">
-                  <button :disabled="!s.bonus" @click="step(c as string, -1)" :aria-label="'Retirer ' + LABELS[c]">−</button>
-                  <span class="mono" :class="{ bad: !s.bonusValid }">{{ s.bonus ? "+" + s.bonus : "0" }}</span>
-                  <button :disabled="!canAdd(c as string)" @click="step(c as string, 1)" :aria-label="'Ajouter ' + LABELS[c]">+</button>
+              <td>
+                <div class="spend">
+                  <button class="step" :disabled="!s.bonus" @click="step(c as string, -1)" :title="s.prev ? `Retirer le dernier achat (−${s.prev.sup})` : ''" :aria-label="'Retirer ' + LABELS[c]">−</button>
+                  <input
+                    class="mono"
+                    type="number"
+                    min="0"
+                    :max="s.bonusCost + Math.max(0, view.remaining)"
+                    :value="s.bonusCost"
+                    :aria-label="'Capital à dépenser en ' + LABELS[c]"
+                    @change="setCapital(c as string, $event)"
+                    @keydown.enter="($event.target as HTMLInputElement).blur()"
+                  />
+                  <button
+                    v-for="n in STEPS"
+                    :key="n"
+                    class="step"
+                    :disabled="!s.adds?.[n]"
+                    :title="s.adds?.[n] ? `${s.adds[n]!.capital} capital → +${s.adds[n]!.gain} ${LABELS[c]}` : 'Capital insuffisant ou maximum atteint'"
+                    @click="addCapital(c as string, n)"
+                  >+{{ n }}</button>
                 </div>
-                <div v-if="s.bonusCost" class="small muted">{{ s.bonusCost }} capital</div>
+              </td>
+              <td class="num">
+                <span class="mono" :class="{ bad: !s.bonusValid }">{{ s.bonus ? "+" + fmtNum(s.bonus) : "0" }}</span>
               </td>
               <td class="num" :class="{ up: s.bonus > 0 }">{{ fmtNum(s.after) }}</td>
               <td class="num small secondary">
@@ -175,7 +216,7 @@ async function validate() {
         </table>
       </div>
       <div v-if="view.owned" class="row actions">
-        <span class="small muted">Les points s'achètent par paliers (ex. Force : +2 par capital jusqu'à 200 ajoutés, puis +1, puis 2 capital pour +1 au-delà de 400).</span>
+        <span class="small muted">+1 / +10 / +100 dépensent autant de capital (ou le reste) aux paliers en vigueur, comme sur Leek Wars ; le champ accepte n'importe quel montant. Ex. Force : +2 par capital jusqu'à 200 ajoutés, puis +1, puis 2 capital pour +1 au-delà de 400.</span>
         <span class="spacer"></span>
         <button :disabled="!changes.length" @click="reset">Réinitialiser</button>
         <button v-if="!confirming" class="primary" :disabled="!changes.length || !view.valid" @click="confirming = true">Valider la répartition</button>
@@ -219,9 +260,9 @@ async function validate() {
 .charac-icon { width: 28px; height: 28px; object-fit: contain; flex: none; }
 .charac strong { font-size: 16px; }
 .total { font-size: 17px; }
-.stepper { display: inline-flex; align-items: center; gap: 6px; }
-.stepper button { width: 28px; height: 28px; padding: 0; font-weight: 600; }
-.stepper .mono { min-width: 40px; text-align: center; }
+.spend { display: inline-flex; align-items: center; gap: 4px; }
+.spend .step { min-width: 28px; height: 28px; padding: 0 6px; font-weight: 600; }
+.spend input { width: 64px; height: 28px; text-align: right; }
 .bad { color: var(--critical); }
 .up { color: var(--good); font-weight: 600; }
 tr.planned { background: color-mix(in srgb, var(--accent) 8%, transparent); }
