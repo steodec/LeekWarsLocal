@@ -3,6 +3,7 @@ import { ref } from "vue";
 import { api } from "../api";
 import { state, refreshStatus, switchAccount, trackJob, type Account } from "../state";
 import { fmtNum } from "../format";
+import { updater, checkForUpdate, installUpdate } from "../updater";
 
 interface Settings {
   accounts: Account[];
@@ -151,6 +152,21 @@ const doBackup = () =>
       <button :disabled="busy" @click="doBackup">Sauvegarder la base</button>
       <span v-if="backup" class="small good">✓ {{ backup }}</span>
     </div>
+  </section>
+
+  <section class="card" v-if="updater.enabled">
+    <h2>Mises à jour</h2>
+    <div class="secondary">Version installée : <b>{{ updater.current || "?" }}</b></div>
+    <div class="row" style="margin-top: 10px">
+      <button v-if="updater.phase === 'available'" class="primary" @click="installUpdate">Installer la version {{ updater.version }}</button>
+      <button v-else :disabled="['checking', 'downloading', 'installing'].includes(updater.phase)" @click="checkForUpdate">
+        {{ updater.phase === "checking" ? "Vérification…" : "Rechercher une mise à jour" }}
+      </button>
+      <span v-if="updater.phase === 'uptodate'" class="small good">✓ À jour</span>
+      <span v-else-if="updater.phase === 'downloading'" class="small">Téléchargement… {{ Math.round(updater.progress * 100) }} %</span>
+      <span v-else-if="updater.phase === 'error'" class="small bad">{{ updater.error }}</span>
+    </div>
+    <p class="small secondary">Vérification automatique au démarrage puis toutes les 6 heures (releases GitHub signées).</p>
   </section>
 </template>
 

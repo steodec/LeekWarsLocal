@@ -44,6 +44,18 @@
         ],
         "installMode": "currentUser"
       }
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDY2N0IwMTJFNkFEODQ2OTcKUldTWFJ0aHFMZ0Y3WmtlK0lwSjRPTnpySUZLQlZITnJLSDhIWm8wdVpFWjdMWjBNd0s0YUdxVGcK",
+      "endpoints": [
+        "https://github.com/steodec/LeekWarsLocal/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }
