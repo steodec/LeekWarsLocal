@@ -863,9 +863,9 @@ route("GET", "/api/leeks/:id/characteristics", "Caractéristiques : base, capita
   return { ...characteristicsView(leek), owned: !!owner, accountName: owner?.account.name ?? null };
 });
 
-route("POST", "/api/leeks/:id/characteristics/preview", "Simule une répartition sans dépenser. Body : {bonuses: {strength: 10, life: 40, …}} (points de carac. à ajouter)", async ({ params, body }) => {
+route("POST", "/api/leeks/:id/characteristics/preview", "Simule une répartition sans dépenser. Body : {bonuses: {strength: 10, life: 40, …}} (points de carac. à ajouter), spend?: {strength: 25} (capital à dépenser, converti en points). Chaque carac. a adds[1|10|100] : effet de +N capital", async ({ params, body }) => {
   const { owner, leek } = await leekForCharacteristics(params.id);
-  return { ...characteristicsView(leek, body.bonuses ?? body), owned: !!owner, accountName: owner?.account.name ?? null };
+  return { ...characteristicsView(leek, body.bonuses ?? (body.spend ? {} : body), body.spend ?? {}), owned: !!owner, accountName: owner?.account.name ?? null };
 });
 
 route("POST", "/api/leeks/:id/characteristics", "Dépense le capital d'un de mes poireaux (irréversible sans potion de restat). Body : {bonuses: {…}}", async ({ params, body }) => {

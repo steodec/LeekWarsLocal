@@ -78,6 +78,26 @@ export function costOf(stat, added, bonus) {
   return { capital, valid: total === bonus, reached: total };
 }
 
+/**
+ * Points obtenus en dépensant au plus `budget` capital à partir de `added` points déjà ajoutés
+ * (achats successifs au palier courant, comme les boutons +1 / +10 / +100 de Leek Wars).
+ * @returns {{bonus: number, capital: number}} capital = capital réellement dépensé (≤ budget).
+ */
+export function bonusForCapital(stat, added, budget) {
+  let capital = 0;
+  let bonus = 0;
+  for (;;) {
+    const s = stepAt(stat, added + bonus);
+    if (!s || capital + s.capital > budget) break;
+    capital += s.capital;
+    bonus += s.sup;
+  }
+  return { bonus, capital };
+}
+
+/** Montants de capital proposés par l'interface (comme Leek Wars). */
+export const CAPITAL_STEPS = [1, 10, 100];
+
 /** Achat suivant / précédent possible, pour les boutons +/− de l'interface. */
 export function neighbours(stat, added, bonus) {
   const next = stepAt(stat, added + bonus);
@@ -93,8 +113,11 @@ export function neighbours(stat, added, bonus) {
   return { next: next ? { sup: next.sup, capital: next.capital } : null, prev: prev ? { sup: prev.sup, capital: prev.capital } : null };
 }
 
-/** Vue complète des caractéristiques d'un poireau (réponse de leek/get-private) + plan de répartition. */
-export function characteristicsView(leek, bonuses = {}) {
+/**
+ * Vue complète des caractéristiques d'un poireau (réponse de leek/get-private) + plan de répartition.
+ * `bonuses` : points à ajouter par caractéristique ; `spend` : capital à dépenser (converti en points, prioritaire).
+ */
+export function characteristicsView(leek, bonuses = {}, spend = {}) {
   const stats = {};
   let planned = 0;
   let valid = true;
@@ -103,7 +126,10 @@ export function characteristicsView(leek, bonuses = {}) {
     const current = leek[c] ?? base; // base + capital déjà investi
     const added = Math.max(0, current - base);
     const equipment = (leek[`total_${c}`] ?? current) - current;
-    const bonus = Math.max(0, Math.round(Number(bonuses[c]) || 0));
+    const bonus =
+      spend[c] != null
+        ? bonusForCapital(c, added, Math.max(0, Math.floor(Number(spend[c]) || 0))).bonus
+        : Math.max(0, Math.round(Number(bonuses[c]) || 0));
     const cost = costOf(c, added, bonus);
     if (!cost.valid) valid = false;
     planned += cost.capital;
@@ -122,6 +148,16 @@ export function characteristicsView(leek, bonuses = {}) {
     };
   }
   const capital = leek.capital ?? 0;
+  // Effet des boutons +1 / +10 / +100 : capital ajouté à celui déjà prévu, plafonné au capital restant.
+  const remaining = capital - planned;
+  for (const c of CHARACTERISTICS) {
+    const s = stats[c];
+    s.adds = {};
+    for (const n of CAPITAL_STEPS) {
+      const r = bonusForCapital(c, s.added, s.bonusCost + Math.min(n, Math.max(0, remaining)));
+      s.adds[n] = r.bonus > s.bonus ? { bonus: r.bonus, gain: r.bonus - s.bonus, capital: r.capital - s.bonusCost } : null;
+    }
+  }
   return {
     leekId: leek.id,
     name: leek.name,
