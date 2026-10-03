@@ -9,6 +9,7 @@ import LineChart from "../components/LineChart.vue";
 import LeekImage from "../components/LeekImage.vue";
 import ItemIcon from "../components/ItemIcon.vue";
 import FightReplay, { type ReplayData } from "../components/FightReplay.vue";
+import AiAnalysis from "../components/AiAnalysis.vue";
 import { lwImage } from "../lw";
 import { leekscriptErrors, logLines, type LogLine } from "../fightlogs";
 
@@ -210,6 +211,8 @@ const entitiesWithItems = computed(() => (analysis.value?.entities ?? []).filter
         </div>
       </div>
     </section>
+
+    <AiAnalysis v-if="analysis" :fight-id="summary.id" :leek="perspectiveLeek" />
 
     <section class="card">
       <h2>Replay</h2>

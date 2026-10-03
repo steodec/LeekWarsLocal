@@ -80,6 +80,41 @@ const confirmRemove = () =>
     removing.value = null;
   });
 
+// --- Analyse IA des combats (Claude / ChatGPT) ---
+interface AiProvider { label: string; models: string[]; model: string; keyMasked: string | null; configured: boolean }
+interface AiSettings { provider: string | null; providers: Record<string, AiProvider>; prompt: string; customPrompt: boolean; defaultPrompt: string; includeCode: boolean }
+
+const ai = ref<AiSettings | null>(null);
+const aiKeys = ref<Record<string, string>>({ anthropic: "", openai: "" });
+const aiModels = ref<Record<string, string>>({ anthropic: "", openai: "" });
+const aiPrompt = ref("");
+const aiEditKey = ref<string | null>(null);
+
+async function loadAi() {
+  try {
+    ai.value = await api.get("/api/ai/settings");
+    aiPrompt.value = ai.value!.prompt;
+    for (const [id, p] of Object.entries(ai.value!.providers)) aiModels.value[id] = p.model;
+  } catch (e: any) {
+    error.value = e.message;
+  }
+}
+loadAi();
+
+const saveAi = (body: Record<string, unknown>, message: string) =>
+  run(async () => {
+    ai.value = await api.put("/api/ai/settings", body);
+    aiPrompt.value = ai.value!.prompt;
+    info.value = message;
+  });
+
+async function saveAiKey(id: string) {
+  await saveAi({ [`${id}Key`]: aiKeys.value[id] }, `Clé ${ai.value?.providers[id].label} vérifiée et enregistrée.`);
+  if (error.value) return;
+  aiKeys.value[id] = "";
+  aiEditKey.value = null;
+}
+
 const doBackup = () =>
   run(async () => {
     const res = await api.post("/api/backup");
@@ -144,6 +179,66 @@ const doBackup = () =>
     </p>
   </section>
 
+  <section class="card" v-if="ai">
+    <h2>Analyse IA des combats</h2>
+    <p class="small muted" style="margin-top: -6px">
+      Sur la page d'un combat, Claude ou ChatGPT donne une note de code (votre IA), une note de RPG (build, équipement, tactique) et une
+      note globale, avec des conseils. Chaque analyse est facturée sur votre clé par le fournisseur (quelques centimes selon le modèle et la
+      taille du code envoyé).
+    </p>
+
+    <div class="accounts">
+      <div v-for="(p, id) in ai.providers" :key="id" class="account" :class="{ active: ai.provider === id }">
+        <div class="row">
+          <div>
+            <b>{{ p.label }}</b>
+            <span v-if="ai.provider === id" class="tag act">utilisé</span>
+            <div class="small secondary">
+              <template v-if="p.configured">Clé <code>{{ p.keyMasked }}</code></template>
+              <template v-else>Aucune clé</template>
+            </div>
+          </div>
+          <span class="spacer"></span>
+          <label class="row small secondary" style="gap: 6px">
+            Modèle
+            <input v-model="aiModels[id]" :list="`models-${id}`" style="width: 170px" @change="saveAi({ [`${id}Model`]: aiModels[id] }, `Modèle ${p.label} : ${aiModels[id] || 'par défaut'}.`)" />
+            <datalist :id="`models-${id}`"><option v-for="m in p.models" :key="m" :value="m" /></datalist>
+          </label>
+          <button v-if="p.configured && ai.provider !== id" :disabled="busy" @click="saveAi({ provider: id }, `${p.label} sera utilisé pour les analyses.`)">Utiliser</button>
+          <button class="ghost" :disabled="busy" @click="aiEditKey = aiEditKey === id ? null : id; aiKeys[id] = ''">{{ p.configured ? "Changer la clé" : "Ajouter une clé" }}</button>
+          <button v-if="p.configured" class="danger" :disabled="busy" @click="saveAi({ [`${id}Key`]: '' }, `Clé ${p.label} supprimée.`)">Retirer</button>
+        </div>
+        <div v-if="aiEditKey === id" class="row" style="margin-top: 8px">
+          <input v-model="aiKeys[id]" type="password" autocomplete="off" spellcheck="false" :placeholder="id === 'anthropic' ? 'Clé API Anthropic (sk-ant-…)' : 'Clé API OpenAI (sk-…)'" style="flex: 1; min-width: 220px" @keyup.enter="aiKeys[id] && saveAiKey(String(id))" />
+          <button class="primary" :disabled="busy || !aiKeys[id].trim()" @click="saveAiKey(String(id))">Vérifier et enregistrer</button>
+        </div>
+      </div>
+    </div>
+    <p class="small muted">
+      Clés à créer sur <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a> ou
+      <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">platform.openai.com</a>. Elles sont vérifiées puis stockées
+      en clair dans la base locale, comme les clés Leek Wars, et ne sont jamais renvoyées en entier à l'interface.
+    </p>
+
+    <label class="row small secondary" style="gap: 6px; margin-top: 8px">
+      <input type="checkbox" :checked="ai.includeCode" :disabled="busy" @change="saveAi({ includeCode: ($event.target as HTMLInputElement).checked }, 'Préférence enregistrée.')" />
+      Joindre par défaut le code source de l'IA (vos poireaux uniquement), pour une note de code plus précise
+    </label>
+
+    <h3 style="margin: 18px 0 8px">Prompt d'analyse</h3>
+    <p class="small muted" style="margin-top: 0">
+      Consignes données au modèle (rôle, critères des notes). Les données du combat, les logs, le code et le format de réponse sont ajoutés
+      automatiquement. Il peut aussi être modifié ponctuellement depuis la page d'un combat.
+    </p>
+    <textarea v-model="aiPrompt" rows="16" spellcheck="false" class="prompt"></textarea>
+    <div class="row" style="margin-top: 6px">
+      <span class="small secondary">{{ ai.customPrompt ? "Prompt personnalisé." : "Prompt par défaut." }}</span>
+      <span class="spacer"></span>
+      <button v-if="ai.customPrompt || aiPrompt !== ai.prompt" class="ghost" :disabled="busy" @click="saveAi({ prompt: null }, 'Prompt d\'origine rétabli.')">Rétablir le prompt d'origine</button>
+      <button class="primary" :disabled="busy || aiPrompt === ai.prompt" @click="saveAi({ prompt: aiPrompt }, 'Prompt enregistré.')">Enregistrer le prompt</button>
+    </div>
+  </section>
+
   <section class="card" v-if="s">
     <h2>Stockage</h2>
     <div class="secondary">Base SQLite : <code>{{ s.storage.file }}</code></div>
@@ -177,6 +272,7 @@ const doBackup = () =>
 .tag.act { color: var(--accent); margin-left: 6px; }
 .good { color: var(--good); }
 .bad { color: var(--critical); }
+.prompt { width: 100%; font-family: var(--font-mono, monospace); font-size: 12px; line-height: 1.45; resize: vertical; }
 .ok { border-color: var(--good); color: var(--good); }
 .confirm { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; padding: 10px; border: 1px solid var(--warning); background: color-mix(in srgb, var(--warning) 8%, transparent); }
 </style>

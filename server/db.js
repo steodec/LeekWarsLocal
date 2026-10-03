@@ -8,6 +8,7 @@
 //   accounts        comptes Leek Wars (un éleveur + sa clé API) ; un seul est actif à la fois
 //   kv              réglages et méta (farmerId, lastSync, catalogue…)
 //   capital_log     dépenses de capital faites via l'outil
+//   ai_analyses     analyses d'un combat par un modèle de langage (Claude / ChatGPT), historique conservé
 import fs from "node:fs";
 import path from "node:path";
 import zlib from "node:zlib";
@@ -78,6 +79,19 @@ CREATE TABLE IF NOT EXISTS capital_log (
   bonuses TEXT NOT NULL,
   capital INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS ai_analyses (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  fight_id INTEGER NOT NULL REFERENCES fights(id) ON DELETE CASCADE,
+  perspective TEXT NOT NULL,
+  date INTEGER NOT NULL,
+  provider TEXT NOT NULL,
+  model TEXT NOT NULL,
+  prompt TEXT NOT NULL,
+  result TEXT NOT NULL,
+  meta TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS ai_analyses_fight ON ai_analyses(fight_id, date);
 `;
 
 const pack = (obj) => zlib.gzipSync(Buffer.from(JSON.stringify(obj)));
@@ -285,6 +299,23 @@ export class Db {
       ? this.q("SELECT * FROM capital_log WHERE leek_id = ? ORDER BY date DESC").all(leekId)
       : this.q("SELECT * FROM capital_log ORDER BY date DESC").all();
     return rows.map((r) => ({ ...r, bonuses: JSON.parse(r.bonuses) }));
+  }
+
+  // --- analyses IA ---
+  putAiAnalysis({ fightId, perspective, provider, model, prompt, result, meta }) {
+    const id = this.q("INSERT INTO ai_analyses(fight_id, perspective, date, provider, model, prompt, result, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(fightId, perspective, now(), provider, model, prompt, JSON.stringify(result), JSON.stringify(meta ?? {})).lastInsertRowid;
+    return this.aiAnalyses(fightId).find((a) => a.id === Number(id));
+  }
+
+  /** Analyses d'un combat, la plus récente d'abord. */
+  aiAnalyses(fightId) {
+    return this.q("SELECT * FROM ai_analyses WHERE fight_id = ? ORDER BY date DESC, id DESC").all(fightId)
+      .map((r) => ({ id: r.id, fightId: r.fight_id, perspective: r.perspective, date: r.date, provider: r.provider, model: r.model, prompt: r.prompt, result: JSON.parse(r.result), meta: JSON.parse(r.meta) }));
+  }
+
+  removeAiAnalysis(fightId, id) {
+    return this.q("DELETE FROM ai_analyses WHERE fight_id = ? AND id = ?").run(fightId, id).changes;
   }
 
   /** Fichiers SQLite pour la sauvegarde. */
