@@ -8,7 +8,9 @@ import StatTile from "../components/StatTile.vue";
 import LineChart from "../components/LineChart.vue";
 import LeekImage from "../components/LeekImage.vue";
 import ItemIcon from "../components/ItemIcon.vue";
+import FightReplay, { type ReplayData } from "../components/FightReplay.vue";
 import { lwImage } from "../lw";
+import { leekscriptErrors, logLines, type LogLine } from "../fightlogs";
 
 const props = defineProps<{ id: number }>();
 const summary = ref<FightSummary | null>(null);
@@ -17,7 +19,11 @@ const error = ref("");
 const note = ref("");
 const tags = ref("");
 const saved = ref(false);
-const logs = ref<any>(null);
+const logs = ref<LogLine[] | null>(null);
+const logsError = ref("");
+const logsIssuesOnly = ref(false);
+const replayData = ref<ReplayData | null>(null);
+const replayError = ref("");
 const showSummons = ref(false);
 const turnEntity = ref<number | null>(null);
 
@@ -65,12 +71,51 @@ async function follow(id: number) {
 }
 
 async function loadLogs() {
+  logsError.value = "";
   try {
-    logs.value = await api.get(`/api/fights/${props.id}/logs`);
+    const [raw, errors] = await Promise.all([api.get(`/api/fights/${props.id}/logs`), leekscriptErrors()]);
+    logs.value = logLines(raw, errors);
   } catch (e: any) {
-    logs.value = { error: e.message };
+    logsError.value = e.message;
   }
 }
+
+async function loadReplay() {
+  try {
+    replayData.value = await api.get(`/api/fights/${props.id}/replay`);
+    replayError.value = "";
+  } catch (e: any) {
+    replayError.value = e.message;
+  }
+}
+loadReplay();
+loadLogs();
+
+// Logs groupés par tour (tour de l'action à laquelle ils sont rattachés).
+const entityName = (id: number) => replayData.value?.entities.find((e) => e.id === id)?.name ?? `#${id}`;
+const logsByTurn = computed(() => {
+  const actions = replayData.value?.actions ?? [];
+  const turnAt: number[] = [];
+  let turn = 1;
+  actions.forEach((a, i) => {
+    if (a[0] === 6) turn = a[1];
+    turnAt[i] = turn;
+  });
+  const groups: { turn: number; lines: LogLine[] }[] = [];
+  for (const l of logs.value ?? []) {
+    if (logsIssuesOnly.value && l.kind !== "warning" && l.kind !== "error") continue;
+    const t = turnAt[l.action] ?? 0;
+    let last = groups[groups.length - 1];
+    if (last?.turn !== t) groups.push((last = { turn: t, lines: [] }));
+    last.lines.push(l);
+  }
+  return groups;
+});
+const logCounts = computed(() => ({
+  total: logs.value?.length ?? 0,
+  errors: logs.value?.filter((l) => l.kind === "error").length ?? 0,
+  warnings: logs.value?.filter((l) => l.kind === "warning").length ?? 0,
+}));
 
 async function replay() {
   const s = summary.value!;
@@ -164,6 +209,13 @@ const entitiesWithItems = computed(() => (analysis.value?.entities ?? []).filter
           <button @click="save">{{ saved ? "Enregistré ✓" : "Enregistrer" }}</button>
         </div>
       </div>
+    </section>
+
+    <section class="card">
+      <h2>Replay</h2>
+      <FightReplay v-if="replayData" :data="replayData" :logs="logs ?? []" :my-side="summary.mySide" />
+      <div v-else-if="replayError" class="error">{{ replayError }}</div>
+      <div v-else class="muted small">Chargement du combat…</div>
     </section>
 
     <template v-if="analysis">
@@ -276,8 +328,31 @@ const entitiesWithItems = computed(() => (analysis.value?.entities ?? []).filter
       </section>
 
       <section class="card">
-        <div class="row"><h2>Logs IA</h2><span class="spacer"></span><button @click="loadLogs">Charger les logs</button></div>
-        <pre v-if="logs" class="logs">{{ JSON.stringify(logs, null, 2) }}</pre>
+        <div class="row" style="margin-bottom: 8px">
+          <h2>Logs IA</h2>
+          <span v-if="logs" class="small secondary">
+            {{ logCounts.total }} ligne(s)
+            <template v-if="logCounts.errors"> · <span class="log-error">{{ logCounts.errors }} erreur(s)</span></template>
+            <template v-if="logCounts.warnings"> · <span class="log-warning">{{ logCounts.warnings }} avertissement(s)</span></template>
+          </span>
+          <span class="spacer"></span>
+          <label class="row small secondary" style="gap: 6px"><input type="checkbox" v-model="logsIssuesOnly" /> Erreurs et avertissements seulement</label>
+          <button @click="loadLogs">Recharger</button>
+        </div>
+        <div v-if="logsError" class="error">{{ logsError }}</div>
+        <div v-else-if="logs && !logs.length" class="empty small">
+          Aucun log : l'IA n'a rien affiché (debug, debugW, debugE…) et aucune erreur n'a été levée. Les logs ne sont visibles que pour vos propres poireaux.
+        </div>
+        <div v-else-if="logs" class="logs">
+          <template v-for="g in logsByTurn" :key="g.turn">
+            <div class="log-turn">Tour {{ g.turn }}</div>
+            <div v-for="l in g.lines" :key="`${l.action}-${l.index}`" class="log-line" :class="l.kind ? 'log-' + l.kind : ''" :style="l.color ? { color: l.color } : undefined">
+              <span class="muted">[{{ entityName(l.entity) }}]</span> {{ l.text }}
+            </div>
+          </template>
+          <div v-if="!logsByTurn.length" class="muted">Aucune erreur ni avertissement.</div>
+        </div>
+        <div v-else class="muted small">Chargement des logs…</div>
       </section>
     </template>
     <div v-else class="card empty">Combat pas encore terminé ou données indisponibles. <button @click="load(true)">Réessayer</button></div>
@@ -295,5 +370,10 @@ const entitiesWithItems = computed(() => (analysis.value?.entities ?? []).filter
 .win-label { position: absolute; top: -10px; left: 8px; padding: 0 6px; font-size: 12px; background: var(--good); color: var(--accent-ink); }
 .chips { display: flex; gap: 2px; flex-wrap: wrap; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; flex: none; }
-.logs { max-height: 320px; overflow: auto; background: var(--surface-2); border: 1px solid var(--border); padding: 10px; font-size: 12px; }
+.logs { max-height: 420px; overflow: auto; background: var(--surface-2); border: 1px solid var(--border); padding: 10px; font-size: 12px; font-family: var(--font-mono, monospace); white-space: pre-wrap; }
+.log-turn { color: var(--text-muted); margin: 8px 0 2px; }
+.log-turn:first-child { margin-top: 0; }
+.log-warning { color: var(--warning); }
+.log-error { color: var(--critical); }
+.log-pause { color: var(--series-me); }
 </style>

@@ -104,7 +104,8 @@ Doc auto-générée : `GET http://127.0.0.1:3737/api`.
 | POST | `/api/fights/import` | `{ids:[…], force?}` |
 | GET | `/api/fights` | `leek` = point de vue (sans : mon éleveur) ; filtres : `leek, result, context, type, opponent, tag, source, bugs, since, until, q, last, limit, offset` |
 | GET | `/api/fights/:id` | résumé + analyse complète, `?leek=` = point de vue (n'importe quel participant), `?refresh=1` re-télécharge |
-| GET | `/api/fights/:id/raw` · `/api/fights/:id/logs` | données brutes / logs IA |
+| GET | `/api/fights/:id/raw` · `/api/fights/:id/logs` | données brutes / logs IA (`{éleveur: {action: [[entité, type, message, …]]}}`) |
+| GET | `/api/fights/:id/replay` | carte, entités, actions et noms des puces / armes : de quoi rejouer le combat (lecteur de la page combat) |
 | PATCH | `/api/fights/:id` | `{note?, tags?}` |
 | DELETE | `/api/fights/:id` | retire du stockage local |
 | GET | `/api/stats` | agrégats (mêmes filtres que `/api/fights`) |

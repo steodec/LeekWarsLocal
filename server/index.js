@@ -1068,9 +1068,37 @@ route("GET", "/api/fights/:id/raw", "Données brutes Leek Wars du combat", ({ pa
   return raw;
 });
 
+route("GET", "/api/fights/:id/replay", "Données pour rejouer un combat : carte, entités, actions et noms des puces / armes utilisées", async ({ params }) => {
+  const id = Number(params.id);
+  if (!db.hasFight(id)) await importFight(id, { source: "manual" });
+  const raw = db.raw(id);
+  if (!raw?.data?.actions) throw new HttpError(404, "Combat introuvable ou pas encore terminé");
+  const cat = await getCatalog();
+  const chips = {};
+  const weapons = {};
+  for (const a of raw.data.actions) {
+    if (a[0] === 12) {
+      const tpl = a.length === 4 ? a[1] : a[3];
+      chips[tpl] = cat.chips.get(tpl)?.name ?? null;
+    } else if (a[0] === 13) {
+      weapons[a[1]] = cat.weapons.get(a[1])?.name ?? null;
+    }
+  }
+  const { map, leeks, actions } = raw.data;
+  return {
+    id, map, actions, chips, weapons,
+    entities: leeks.map((l) => ({
+      // Invocations : nom interne (« puny_bulb ») rendu lisible.
+      id: l.id, name: l.summon ? String(l.name).replace(/_/g, " ") : l.name, level: l.level, skin: l.skin, hat: l.hat ?? null, metal: !!l.metal, face: l.face ?? 0,
+      team: l.team, life: l.life, cell: l.cellPos, summon: !!l.summon, type: l.type, farmer: l.farmer ?? null,
+    })),
+  };
+});
+
 route("GET", "/api/fights/:id/logs", "Logs IA du combat (debug()), via le compte qui y a participé", async ({ params }) => {
   const raw = db.raw(Number(params.id));
-  const mine = [...(raw?.leeks1 || []), ...(raw?.leeks2 || [])].map((l) => db.account(l.farmer)).find(Boolean);
+  // Les bots (combats de test) n'ont pas d'éleveur : `farmer` absent.
+  const mine = [...(raw?.leeks1 || []), ...(raw?.leeks2 || [])].map((l) => (l.farmer ? db.account(l.farmer) : null)).find(Boolean);
   return (mine ? clientFor(mine) : lwActive()).fightLogs(params.id);
 });
 
