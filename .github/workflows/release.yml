@@ -1,7 +1,11 @@
 # Construit l'installeur Windows signé et le publie en release GitHub.
-# - pull request : build seul (vérifie que tout compile) ;
-# - push sur main : si la release v<version de package.json> n'existe pas encore, build + release.
+# - pull request : build de vérification, non signé et sans aucun secret (contrôle obligatoire avant fusion) ;
+# - push sur main : si la release v<version de package.json> n'existe pas encore, build signé + release.
 #   Pour publier : `npm run release -- patch|minor|major` (incrémente la version, commit, push).
+#
+# La clé de signature des mises à jour n'est accessible qu'au job `release`, via l'environnement protégé
+# « release » (branche main uniquement, approbation manuelle) : une PR fusionnée ne peut pas la lire sans
+# qu'on ait validé le déploiement. Actions épinglées par SHA (Dependabot les met à jour).
 name: Release
 
 on:
@@ -9,9 +13,14 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      sign_test:
+        description: "Build signé sans publier (vérifie la clé de signature)"
+        type: boolean
+        default: false
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -19,36 +28,64 @@ concurrency:
 
 jobs:
   build:
+    if: github.event_name == 'pull_request'
     runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      # Sans installeur : pas de signature, donc pas besoin de la clé.
+      - name: Build de vérification (non signé)
+        run: npm run build:app -- --no-bundle
+
+  check:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      publish: ${{ steps.version.outputs.publish }}
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # historique et tags pour les notes de release
-
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Version à publier
         id: version
-        shell: bash
         run: |
           version=$(node -p "require('./package.json').version")
           echo "version=$version" >> "$GITHUB_OUTPUT"
           publish=false
-          if [ "${{ github.event_name }}" != "pull_request" ] && ! gh release view "v$version" >/dev/null 2>&1; then publish=true; fi
+          if ! gh release view "v$version" >/dev/null 2>&1; then publish=true; fi
           echo "publish=$publish" >> "$GITHUB_OUTPUT"
           echo "Version $version — publication : $publish"
 
-      - uses: actions/setup-node@v4
+  release:
+    needs: check
+    if: needs.check.outputs.publish == 'true' || inputs.sign_test
+    runs-on: windows-latest
+    environment: release
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0 # historique et tags pour les notes de release
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri
-
       - run: npm ci
 
       - name: Build de l'installeur (signé)
@@ -58,5 +95,5 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
 
       - name: Publication de la release
-        if: steps.version.outputs.publish == 'true'
+        if: needs.check.outputs.publish == 'true'
         run: node scripts/publish-release.mjs

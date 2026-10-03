@@ -1,0 +1,7 @@
+# Fichiers qui touchent à la construction et à la signature des versions : à relire avec attention
+# dans les pull requests (un changement ici peut exposer la clé de signature des mises à jour).
+/.github/ @steodec
+/scripts/ @steodec
+/src-tauri/ @steodec
+package.json @steodec
+package-lock.json @steodec

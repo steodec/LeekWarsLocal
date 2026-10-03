@@ -1,0 +1,8 @@
+# Met à jour les actions épinglées par SHA dans les workflows (les failles des dépendances npm et Cargo
+# passent par les mises à jour de sécurité de Dependabot, activées dans les réglages du dépôt).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
