@@ -97,6 +97,8 @@ Doc auto-générée : `GET http://127.0.0.1:3737/api`.
 | POST | `/api/fights/solo` | `{leekId, targetId?, strategy?, count?, batch?}` → tâche |
 | POST | `/api/fights/farmer` | `{targetId?, strategy?, count?, batch?}` → tâche |
 | POST | `/api/fights/challenge` | `{leekId, targetId, seed?, side?, count?}` → tâche |
+| GET | `/api/fights/test` | IA de test (lambda, normal, confirmed, expert), bots et scénarios de l'éditeur ; `?leekId=` → scénario retenu par IA |
+| POST | `/api/fights/test` | `{leekId, ais?, scenarioIds?, count?, aiPath?}` → tâche : combats de test gratuits contre les bots, via les scénarios de l'éditeur (la clé API ne peut pas les créer) |
 | GET | `/api/jobs` · `/api/jobs/:id` | suivi des tâches (progression, combats, logs) |
 | POST | `/api/sync` | `{leekIds?, limit?}` importe l'historique |
 | POST | `/api/fights/import` | `{ids:[…], force?}` |
