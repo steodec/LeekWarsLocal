@@ -59,6 +59,15 @@ traduites, filtre « erreurs et avertissements seulement ».
 
 ![Logs IA](docs/screenshots/logs.jpg)
 
+### Analyse IA d'un combat
+
+Avec une clé API **Claude** ou **ChatGPT** (Paramètres → Analyse IA des combats), la page d'un combat propose une analyse
+par le modèle : **note de code** (robustesse, efficacité, logique de l'IA), **note de RPG** (build, équipement, tactique) et
+**note globale** sur 100, puis l'analyse détaillée, les moments clés et des recommandations classées par priorité. Le modèle
+reçoit le résumé du combat, le tour par tour, les logs et, pour vos poireaux, le code source de l'IA (lu via `ai/read`).
+Le prompt par défaut est modifiable (dans Paramètres, ou ponctuellement depuis le combat) ; les analyses sont conservées.
+Chaque analyse est facturée par le fournisseur sur votre clé.
+
 ### Lancer des combats et tester son IA
 
 Combats solo ou éleveur (N combats, choix de l'adversaire : le plus faible, le plus proche en talent, le plus fort,
@@ -166,6 +175,9 @@ Doc auto-générée : `GET http://127.0.0.1:3737/api`.
 | GET | `/api/fights/:id` | résumé + analyse complète, `?leek=` = point de vue (n'importe quel participant), `?refresh=1` re-télécharge |
 | GET | `/api/fights/:id/raw` · `/api/fights/:id/logs` | données brutes / logs IA (`{éleveur: {action: [[entité, type, message, …]]}}`) |
 | GET | `/api/fights/:id/replay` | carte, entités, actions et noms des puces / armes : de quoi rejouer le combat (lecteur de la page combat) |
+| GET · POST | `/api/fights/:id/ai-analysis` | analyses IA conservées · lance une analyse Claude / ChatGPT `{leek?, provider?, model?, prompt?, includeCode?, dryRun?}` (`dryRun` : renvoie le message sans appeler le modèle) |
+| DELETE | `/api/fights/:id/ai-analysis/:aid` | supprime une analyse IA |
+| GET · PUT | `/api/ai/settings` | réglages de l'analyse IA (clés masquées, modèles, prompt) · `{provider?, anthropicKey?, openaiKey?, anthropicModel?, openaiModel?, prompt?, includeCode?}` |
 | PATCH | `/api/fights/:id` | `{note?, tags?}` |
 | DELETE | `/api/fights/:id` | retire du stockage local |
 | GET | `/api/stats` | agrégats (mêmes filtres que `/api/fights`) |

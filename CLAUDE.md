@@ -16,6 +16,7 @@ Outil local de gestion/analyse des combats Leek Wars. Voir README.md pour le dé
 - Caractéristiques : `GET /api/leeks/:id/characteristics`, simuler avec `POST …/characteristics/preview`. `POST /api/leeks/:id/characteristics` dépense du capital (irréversible) : uniquement sur demande explicite. `bonuses` = points de caractéristique à ajouter (pas du capital).
 - Analyse d'un combat : `analysis.entities[]` (dégâts, soins, PT/PM par tour, bugs, ops, objets), `analysis.turnsLog`, `analysis.lifeTimeline`.
 - Logs IA : `GET /api/fights/:id/logs` (via le compte qui a participé ; vides si l'IA n'appelle pas debug()). Types 2/7 avertissement, 3/8 erreur (6-8 : code d'erreur LeekScript en `log[3]`, messages dans `public/lw/leekscript-errors.json`), 5 pause, 4/9/10 marqueurs. Mise en forme : `src/fightlogs.ts`.
+- Analyse IA (Claude / ChatGPT) : `server/ai.js` (prompt par défaut `DEFAULT_PROMPT`, schéma de réponse `RESULT_SCHEMA`, appels `fetch` directs), réglages en kv `ai` (`GET/PUT /api/ai/settings`), résultats dans la table `ai_analyses`. `POST /api/fights/:id/ai-analysis` est payant (clé du fournisseur) : ne pas le lancer sans demande ; `{dryRun: true}` montre le message envoyé sans appel. Le code source de l'IA se lit avec `POST ai/read {path}` (clé player), chemins dans `farmer.ai_tree`, entrée dans `leek.ai_path`. Composant `src/components/AiAnalysis.vue`.
 - Replay : `GET /api/fights/:id/replay` → `src/components/FightReplay.vue` (carte en losanges, géométrie de `leek-wars/src/model/field.ts`).
 
 ## Code

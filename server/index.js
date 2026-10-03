@@ -12,6 +12,7 @@ import { Db } from "./db.js";
 import { analyzeFight, ANALYSIS_VERSION, CONTEXTS, TYPES } from "./analyze.js";
 import { computeStats } from "./stats.js";
 import { characteristicsView, CHARACTERISTICS } from "./capital.js";
+import { PROVIDERS, DEFAULT_PROMPT, AiError, aiSettings, resolveProvider, formatLogs, fightDigest, collectAiCode, buildUserMessage, runAnalysis, checkKey } from "./ai.js";
 
 // Emplacement des données : le dossier applicatif de l'application de bureau (%APPDATA%\com.steodec.leekwarslocal),
 // en dev comme dans l'application packagée (Tauri fournit LWL_DATA_DIR). Une seule base, quel que soit le serveur
@@ -1036,6 +1037,25 @@ route("GET", "/api/fights", "Liste des combats. Query : leek | account (perspect
   return { total: list.length, offset, limit, fights: list.slice(offset, offset + limit) };
 });
 
+/** Point de vue sur un combat : poireau demandé, sinon le compte actif s'il a participé, sinon un autre de mes comptes, un poireau suivi, le premier. */
+function fightPerspective(raw, leek) {
+  const participants = [...(raw.leeks1 || []), ...(raw.leeks2 || [])];
+  const fids = myFarmerIds();
+  const active = activeFarmerId();
+  const tracked = new Set(db.trackedLeeks().map((t) => t.id));
+  const myFarmerInFight = participants.some((l) => l.farmer === active) ? active : participants.find((l) => fids.has(l.farmer))?.farmer;
+  if (leek && participants.some((l) => l.id === Number(leek))) return { leekId: Number(leek) };
+  if (myFarmerInFight) return { farmerId: myFarmerInFight };
+  return { leekId: (participants.find((l) => tracked.has(l.id)) ?? participants[0])?.id };
+}
+
+/** Client du compte qui a participé au combat (logs IA), sinon du compte actif. */
+function fightClient(raw) {
+  // Les bots (combats de test) n'ont pas d'éleveur : `farmer` absent.
+  const mine = [...(raw?.leeks1 || []), ...(raw?.leeks2 || [])].map((l) => (l.farmer ? db.account(l.farmer) : null)).find(Boolean);
+  return mine ? clientFor(mine) : lwActive();
+}
+
 route("GET", "/api/fights/:id", "Résumé + analyse détaillée d'un combat (importé à la volée). Query : leek = point de vue (n'importe quel poireau du combat)", async ({ params, query }) => {
   const id = Number(params.id);
   if (!db.hasFight(id) || query.refresh) await importFight(id, { source: "manual", force: true });
@@ -1043,14 +1063,8 @@ route("GET", "/api/fights/:id", "Résumé + analyse détaillée d'un combat (imp
   if (!raw) throw new HttpError(404, "Combat introuvable ou pas encore terminé");
   const participants = [...(raw.leeks1 || []), ...(raw.leeks2 || [])];
   const fids = myFarmerIds();
-  const active = activeFarmerId();
   const tracked = new Set(db.trackedLeeks().map((t) => t.id));
-  // Point de vue : poireau demandé, sinon le compte actif s'il a participé, sinon un autre de mes comptes, un poireau suivi, le premier.
-  const myFarmerInFight = participants.some((l) => l.farmer === active) ? active : participants.find((l) => fids.has(l.farmer))?.farmer;
-  let perspective;
-  if (query.leek && participants.some((l) => l.id === Number(query.leek))) perspective = { leekId: Number(query.leek) };
-  else if (myFarmerInFight) perspective = { farmerId: myFarmerInFight };
-  else perspective = { leekId: (participants.find((l) => tracked.has(l.id)) ?? participants[0])?.id };
+  const perspective = fightPerspective(raw, query.leek);
   const { summary, analysis } = await analysisOf(id, perspective);
   const meta = db.fightMeta(id);
   return {
@@ -1095,11 +1109,137 @@ route("GET", "/api/fights/:id/replay", "Données pour rejouer un combat : carte,
   };
 });
 
-route("GET", "/api/fights/:id/logs", "Logs IA du combat (debug()), via le compte qui y a participé", async ({ params }) => {
-  const raw = db.raw(Number(params.id));
-  // Les bots (combats de test) n'ont pas d'éleveur : `farmer` absent.
-  const mine = [...(raw?.leeks1 || []), ...(raw?.leeks2 || [])].map((l) => (l.farmer ? db.account(l.farmer) : null)).find(Boolean);
-  return (mine ? clientFor(mine) : lwActive()).fightLogs(params.id);
+route("GET", "/api/fights/:id/logs", "Logs IA du combat (debug()), via le compte qui y a participé", async ({ params }) =>
+  fightClient(db.raw(Number(params.id))).fightLogs(params.id));
+
+// ---------------------------------------------------------------------------
+// Analyse IA d'un combat (Claude / ChatGPT)
+// ---------------------------------------------------------------------------
+
+function aiSettingsView() {
+  const s = aiSettings(db);
+  return {
+    provider: resolveProvider(s, null),
+    providers: Object.fromEntries(Object.entries(PROVIDERS).map(([id, p]) => [id, { label: p.label, models: p.models, model: s.models[id], keyMasked: maskKey(s.keys[id]), configured: !!s.keys[id] }])),
+    prompt: s.prompt ?? DEFAULT_PROMPT,
+    customPrompt: !!s.prompt,
+    defaultPrompt: DEFAULT_PROMPT,
+    includeCode: s.includeCode,
+  };
+}
+
+route("GET", "/api/ai/settings", "Analyse IA : fournisseur (anthropic | openai), clés masquées, modèles, prompt courant et prompt par défaut", () => aiSettingsView());
+
+route("PUT", "/api/ai/settings", "Analyse IA : réglages. Body : {provider?, anthropicKey?, openaiKey? (vérifiées ; \"\" = supprimer), anthropicModel?, openaiModel?, prompt? (null ou \"\" = prompt par défaut), includeCode?}", async ({ body }) => {
+  const next = { ...(db.get("ai") ?? {}) };
+  for (const p of Object.keys(PROVIDERS)) {
+    if (body[`${p}Key`] === undefined) continue;
+    const key = String(body[`${p}Key`] ?? "").trim();
+    if (key) await checkKey(p, key);
+    next[`${p}Key`] = key || null;
+    if (key && !next.provider) next.provider = p;
+  }
+  if (body.provider !== undefined) {
+    if (body.provider && !PROVIDERS[body.provider]) throw new HttpError(400, `Fournisseur inconnu : ${body.provider}`);
+    next.provider = body.provider || null;
+  }
+  for (const p of Object.keys(PROVIDERS)) if (body[`${p}Model`] !== undefined) next[`${p}Model`] = String(body[`${p}Model`] ?? "").trim() || null;
+  if (body.prompt !== undefined) {
+    const prompt = String(body.prompt ?? "").trim();
+    next.prompt = prompt && prompt !== DEFAULT_PROMPT.trim() ? prompt : null;
+  }
+  if (body.includeCode !== undefined) next.includeCode = !!body.includeCode;
+  db.set("ai", next);
+  return aiSettingsView();
+});
+
+let lsErrors = null;
+/** Messages des erreurs LeekScript (public/lw/leekscript-errors.json, copié dans dist/ au build). */
+function leekscriptErrors() {
+  if (lsErrors) return lsErrors;
+  for (const f of [path.join(DIST, "lw", "leekscript-errors.json"), path.join(ROOT, "public", "lw", "leekscript-errors.json")]) {
+    try {
+      return (lsErrors = JSON.parse(fs.readFileSync(f, "utf8")));
+    } catch {
+      /* emplacement suivant */
+    }
+  }
+  return {};
+}
+
+const aiRunning = new Set();
+
+route("GET", "/api/fights/:id/ai-analysis", "Analyses IA déjà faites pour ce combat (la plus récente d'abord) + réglages IA", ({ params }) => ({
+  analyses: db.aiAnalyses(Number(params.id)),
+  settings: aiSettingsView(),
+  running: aiRunning.has(Number(params.id)),
+}));
+
+route("POST", "/api/fights/:id/ai-analysis", "Analyse un combat avec Claude ou ChatGPT (facturé sur la clé configurée) : note de code, note de RPG, note globale et commentaires. Body : {leek? (point de vue), provider?, model?, prompt? (sinon celui des réglages), includeCode?, dryRun? (renvoie le message sans appeler le modèle)}", async ({ params, body }) => {
+  const id = Number(params.id);
+  const settings = aiSettings(db);
+  const provider = resolveProvider(settings, body.provider) ?? (body.dryRun ? body.provider || "anthropic" : null);
+  if (!provider) throw new HttpError(400, "Aucune clé d'IA configurée : ajoutez une clé Claude ou ChatGPT dans Paramètres.", "no_ai_key");
+  if (aiRunning.has(id)) throw new HttpError(409, "Une analyse de ce combat est déjà en cours.");
+  if (!db.hasFight(id)) await importFight(id, { source: "manual" });
+  const raw = db.raw(id);
+  if (!raw?.data?.actions) throw new HttpError(404, "Combat introuvable ou pas encore terminé");
+  const perspective = fightPerspective(raw, body.leek);
+  const { summary, analysis } = await analysisOf(id, perspective);
+  if (!analysis) throw new HttpError(404, "Analyse du combat indisponible");
+  aiRunning.add(id);
+  try {
+    const digest = fightDigest({ summary: { ...summary, contextLabel: CONTEXTS[summary.context], typeLabel: TYPES[summary.type] }, analysis, raw });
+    const entityName = (eid) => analysis.entities.find((e) => e.id === eid)?.name ?? `#${eid}`;
+    let logs = null;
+    try {
+      logs = formatLogs(await fightClient(raw).fightLogs(id), raw.data.actions, entityName, leekscriptErrors());
+    } catch (e) {
+      console.warn(`Logs du combat ${id} indisponibles pour l'analyse IA : ${e.message}`);
+    }
+    // Code source : seulement pour mes poireaux du point de vue (lu via le compte propriétaire).
+    let code = { files: [], truncated: false, errors: [], reason: "Code source non demandé : juge l'IA sur son comportement en combat." };
+    if (body.includeCode ?? settings.includeCode) {
+      const sources = [];
+      for (const leekId of summary.myLeeks ?? []) {
+        const o = await ownerOf(leekId).catch(() => null);
+        if (o?.leek.ai_path) sources.push({ leekName: o.leek.name, aiPath: o.leek.ai_path, client: o.client, tree: o.farmer.ai_tree });
+      }
+      code = sources.length
+        ? await collectAiCode(sources)
+        : { ...code, reason: "Code source indisponible (poireau d'un autre joueur ou sans IA) : juge l'IA sur son comportement en combat." };
+    }
+    const prompt = String(body.prompt ?? "").trim() || settings.prompt || DEFAULT_PROMPT;
+    const model = String(body.model ?? "").trim() || settings.models[provider];
+    const user = buildUserMessage({ digest, logs, code });
+    if (body.dryRun) return { dryRun: true, provider, model, prompt, user, chars: prompt.length + user.length };
+    const started = Date.now();
+    const res = await runAnalysis({ provider, apiKey: settings.keys[provider], model, prompt, user });
+    const mainMine = analysis.entities.find((e) => e.mine && !e.summon);
+    return db.putAiAnalysis({
+      fightId: id,
+      perspective: summary.perspective,
+      provider,
+      model: res.model,
+      prompt,
+      result: res.result,
+      meta: {
+        usage: res.usage,
+        durationMs: Date.now() - started,
+        customPrompt: prompt.trim() !== DEFAULT_PROMPT.trim(),
+        perspectiveName: perspective.leekId ? mainMine?.name ?? null : db.account(perspective.farmerId)?.name ?? null,
+        logs: logs ? { total: logs.total, kept: logs.kept, errors: logs.errors, warnings: logs.warnings } : null,
+        code: { files: code.files.map((f) => f.path), truncated: code.truncated, errors: code.errors },
+      },
+    });
+  } finally {
+    aiRunning.delete(id);
+  }
+});
+
+route("DELETE", "/api/fights/:id/ai-analysis/:aid", "Supprime une analyse IA d'un combat", ({ params }) => {
+  if (!db.removeAiAnalysis(Number(params.id), Number(params.aid))) throw new HttpError(404, "Analyse introuvable");
+  return { ok: true };
 });
 
 route("PATCH", "/api/fights/:id", "Annoter un combat. Body : {note?, tags?}", ({ params, body }) => {
@@ -1225,7 +1365,7 @@ const server = http.createServer(async (req, res) => {
     }
     send(404, { error: `Route inconnue : ${req.method} ${url.pathname}. Voir GET /api` });
   } catch (e) {
-    const status = e instanceof HttpError ? e.status : e instanceof LeekWarsError ? 502 : 500;
+    const status = e instanceof HttpError || e instanceof AiError ? e.status : e instanceof LeekWarsError ? 502 : 500;
     if (status >= 500) console.error(e);
     send(status, { error: e.message, code: e.code ?? undefined, details: e.body ?? undefined });
   }
