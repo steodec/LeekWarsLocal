@@ -141,11 +141,21 @@ npm run release -- minor          # ou patch, major, 1.2.3
 Incrémente la version partout, commit « Version X.Y.Z » et push. Sur une branche, la release part à la fusion dans `main` :
 le workflow `.github/workflows/release.yml` construit l'installeur signé sur `windows-latest` et crée la release `vX.Y.Z`
 (installeur, `.sig`, `latest.json` lu par l'updater, et `LeekWarsLocal-setup.exe` pour le lien de téléchargement stable).
-Il ne publie que si la release de la version de `package.json` n'existe pas encore ; sur une pull request il se contente de
-construire. Si un push sur `main` ne déclenche rien : `gh workflow run release.yml --ref main`.
+Il ne publie que si la release de la version de `package.json` n'existe pas encore. Si un push sur `main` ne déclenche
+rien : `gh workflow run release.yml --ref main`.
 
-**Clé de signature** : secret `TAURI_SIGNING_PRIVATE_KEY` du dépôt, copie locale `~/.tauri/leekwarslocal.key`. **À sauvegarder** :
-sans elle, plus aucune mise à jour ne peut être publiée pour les applications déjà installées. Ne jamais la committer.
+**Approbation** : le build signé tourne dans l'environnement GitHub `release` (branche `main` uniquement) et attend qu'on
+l'approuve (onglet Actions → « Review deployments », ou `gh run view <id>` puis le lien). Avant d'approuver, vérifier ce qui
+a changé depuis la dernière release, surtout dans `.github/`, `scripts/`, `src-tauri/` et `package*.json` (voir
+`.github/CODEOWNERS`) : c'est à ce moment que la clé de signature devient accessible au workflow.
+Pour vérifier la clé sans publier : `gh workflow run release.yml --ref main -f sign_test=true`.
+
+**Pull requests** : le job `build` (build non signé, sans aucun secret) doit réussir pour fusionner dans `main`.
+
+**Clé de signature** : secret `TAURI_SIGNING_PRIVATE_KEY` de l'environnement `release`, copie locale
+`~/.tauri/leekwarslocal.key`. **À sauvegarder** : sans elle, plus aucune mise à jour ne peut être publiée pour les
+applications déjà installées. Ne jamais la committer, ne jamais la remplacer par une nouvelle (les applications installées
+ne reconnaîtraient plus les mises à jour).
 
 ## API locale
 
