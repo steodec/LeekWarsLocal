@@ -3,8 +3,7 @@ import { reactive, ref, watch } from "vue";
 import { api, qs, CONTEXTS, TYPES, type FightSummary } from "../api";
 import { state, go } from "../state";
 import { fmtDate, fmtNum, fmtOps } from "../format";
-import ResultBadge from "../components/ResultBadge.vue";
-import LeekImage from "../components/LeekImage.vue";
+import FightMatchup from "../components/FightMatchup.vue";
 
 const initial = Object.fromEntries(new URLSearchParams(window.location.hash.split("?")[1] ?? ""));
 const f = reactive({
@@ -61,7 +60,6 @@ async function importFight() {
   }
 }
 
-const opp = (x: FightSummary) => x.opponents.map((o) => o.name).join(", ") || "?";
 </script>
 
 <template>
@@ -106,16 +104,15 @@ const opp = (x: FightSummary) => x.opponents.map((o) => o.name).join(", ") || "?
       <table>
         <thead>
           <tr>
-            <th>Résultat</th><th>Date</th><th>Adversaire(s)</th><th>Contexte</th>
+            <th>Combat</th><th>Date</th><th>Contexte</th>
             <th class="num">Tours</th><th class="num">Dégâts infl.</th><th class="num">Dégâts subis</th><th class="num">Vie restante</th>
             <th class="num">PT inutilisés/tour</th><th class="num">Ops</th><th class="num">Talent</th><th>Notes</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="x in list" :key="x.id" class="clickable" @click="go('#/fight/' + x.id)">
-            <td><ResultBadge :result="x.result" /></td>
+            <td class="matchup-cell"><FightMatchup :fight="x" /><span v-if="x.type === 0 && x.opponents[0]" class="muted small">niv. {{ x.opponents[0].level }} · {{ x.opponents[0].talent }}</span></td>
             <td class="mono">{{ fmtDate(x.date) }}</td>
-            <td class="leek-cell"><LeekImage v-if="x.opponents[0]" :leek="x.opponents[0]" head :size="28" />{{ opp(x) }} <span class="muted small">niv. {{ x.opponents[0]?.level }} · {{ x.opponents[0]?.talent }}</span></td>
             <td class="secondary">{{ CONTEXTS[x.context] ?? x.context }} · {{ TYPES[x.type] ?? x.type }}</td>
             <td class="num">{{ x.turns ?? "–" }}</td>
             <td class="num">{{ fmtNum(x.me?.damageDealt) }}</td>

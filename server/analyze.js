@@ -1,7 +1,7 @@
 // Analyse d'un combat Leek Wars à partir de `fight.data.actions`.
 // Codes d'actions repris du client officiel (leek-wars/src/model/action.ts).
 
-export const ANALYSIS_VERSION = 8;
+export const ANALYSIS_VERSION = 10;
 
 const A = {
   START_FIGHT: 0, PLAYER_DEAD: 5, NEW_TURN: 6, LEEK_TURN: 7, END_TURN: 8, SUMMON: 9,
@@ -16,7 +16,7 @@ const EFFECT_POISON = 13;
 const EFFECT_AFTEREFFECT = 25;
 
 export const CONTEXTS = { 0: "test", 1: "défi", 2: "potager", 3: "tournoi", 4: "battle royale" };
-export const TYPES = { 0: "solo", 1: "éleveur", 2: "équipe", 3: "battle royale", 4: "boss" };
+export const TYPES = { 0: "solo", 1: "éleveur", 2: "équipe", 3: "battle royale", 4: "boss", 5: "guerre", 6: "chasse au trésor", 7: "colosse" };
 
 /**
  * Analyse un combat du point de vue d'un éleveur (tous ses poireaux) ou d'un poireau précis (n'importe lequel).
@@ -39,6 +39,7 @@ export function analyzeFight(fight, perspective, catalog) {
     leeks1: (fight.leeks1 || []).map(pickLeek),
     leeks2: (fight.leeks2 || []).map(pickLeek),
     mySide: side,
+    sideNames: sideNames(fight),
     result: resultOf(fight, side),
     duration: fight.report?.duration ?? null,
     analysisVersion: ANALYSIS_VERSION,
@@ -87,6 +88,32 @@ function pickLeek(l) {
 /** Apparence (images Leek Wars) : peau, chapeau (id du modèle), métal, visage. */
 function appearance(l) {
   return { skin: l.skin ?? 1, hat: l.hat ?? null, metal: !!l.metal, face: l.face ?? 0 };
+}
+
+/**
+ * Nom de chaque camp comme dans l'historique Leek Wars : poireau (solo), « (éleveur) », « [équipe] ».
+ * `null` en battle royale (pas de camps). L'API fournit `team1_name`/`team2_name` déjà formatés.
+ */
+function sideNames(fight) {
+  if (fight.type === 3) return null;
+  // Arènes (guerre, chasse au trésor, colosse) : effectifs plutôt que la liste des poireaux.
+  const count = (n, word) => `${(fight[`leeks${n}`] || []).length} ${word}`;
+  if (fight.type === 5) return [count(1, "poireaux"), count(2, "poireaux")];
+  if (fight.type === 6) return [count(1, "poireaux"), count(2, "coffres")];
+  if (fight.type === 7) return [count(1, "poireaux"), fight.leeks2?.[0]?.name ?? "Colosse"];
+  const name = (n) => {
+    if (fight[`team${n}_name`]) return fight[`team${n}_name`];
+    const leeks = fight[`leeks${n}`] || [];
+    if (fight.type === 1) {
+      const farmers = fight[`farmers${n}`] || {};
+      const f = farmers[fight[`farmer${n}`]] ?? Object.values(farmers)[0];
+      if (f?.name) return `(${f.name})`;
+    }
+    if (fight.type === 2 && fight[`team${n}`]?.name) return `[${fight[`team${n}`].name}]`;
+    if (fight.type === 4 && n === 1) return `${leeks.length} poireaux`;
+    return leeks.map((l) => l.name).join(", ") || null;
+  };
+  return [name(1), name(2)];
 }
 
 function leekSide(fight, leekId) {
