@@ -1,82 +1,142 @@
+<div align="center">
+
 # LeekWars Local
 
-**[⬇ Télécharger LeekWars Local pour Windows](https://github.com/steodec/LeekWarsLocal/releases/latest/download/LeekWarsLocal-setup.exe)**
+**Gérer, lancer, rejouer et analyser ses combats [Leek Wars](https://leekwars.com), en local.**
+
+[**⬇ Télécharger pour Windows**](https://github.com/steodec/LeekWarsLocal/releases/latest/download/LeekWarsLocal-setup.exe)
 · [toutes les versions](https://github.com/steodec/LeekWarsLocal/releases)
+· [API locale](#api-locale)
 
-Interface locale pour **gérer, lancer et analyser** ses combats Leek Wars, avec une **API REST locale**
-utilisable depuis l'interface, un script, ou Claude.
+![Replay d'un combat d'équipe](docs/screenshots/replay.jpg)
 
-- Serveur Node sans dépendance (`server/`) : parle à l'API Leek Wars, stocke les combats dans une base **SQLite** (`%APPDATA%\com.steodec.leekwarslocal\leekwars.db`, partagée avec l'application de bureau ; `LWL_DATA_DIR` pour changer de dossier ; via `node:sqlite` intégré à Node ≥ 22.13), les analyse.
-- Interface Vue 3 (`src/`) : tableau de bord, lancement de combats, liste filtrable, détail d'un combat, statistiques.
-  Thème et images de Leek Wars (poireaux avec peau et chapeau, puces, armes, caractéristiques, police pixel), thème clair / sombre / auto.
-- Coquille Tauri (`src-tauri/`) optionnelle.
+</div>
 
-## Démarrage
+LeekWars Local est une application de bureau (Windows) qui se branche sur votre compte Leek Wars avec une **clé API** :
+elle importe l'historique de vos poireaux, lance des combats, les **rejoue**, et calcule ce que le site ne montre pas
+(dégâts par puce, PT inutilisés, bêtes noires, taux de victoire par build…). Tout reste sur votre machine, dans une base
+SQLite, et une **API REST locale** permet de piloter l'outil depuis un script ou un agent comme Claude.
+
+## Fonctionnalités
+
+### Tableau de bord
+
+Combats restants, taux de victoire (global, 10 et 50 derniers), série en cours, évolution du talent, adversaires qui vous
+battent le plus souvent et derniers combats. Plusieurs comptes Leek Wars peuvent être ajoutés ; un sélecteur dans l'en-tête
+change le compte et le poireau affichés.
+
+![Tableau de bord](docs/screenshots/dashboard.jpg)
+
+### Combats
+
+Tout l'historique, filtrable par résultat, contexte, type, adversaire, tag ou bug IA. Chaque combat est résumé comme sur
+Leek Wars : votre camp, l'icône du contexte (potager, défi, tournoi, arène) et le camp adverse, nommé selon le type de
+combat (`[équipe]`, `(éleveur)`, Battle Royale, effectifs d'une guerre ou d'une chasse au trésor, colosse).
+
+![Liste des combats](docs/screenshots/fights.jpg)
+
+### Replay
+
+Chaque combat se rejoue dans l'application : carte et obstacles, poireaux qui se déplacent, tirs et puces vers la case
+visée (critiques et échecs distingués), dégâts, soins et poison, invocations, morts et messages. Lecture / pause, action
+ou tour précédent / suivant, curseur et vitesse ; à côté, la vie de chaque entité et un journal des actions où s'insèrent
+les logs de votre IA.
+
+### Détail d'un combat
+
+Camps et point de vue (n'importe quel participant), points de vie par tour, statistiques par entité (dégâts, soins,
+PT / PM utilisés, critiques, échecs, bugs, opérations), objets utilisés, tour par tour, notes et tags, et « Rejouer en défi »
+avec le même seed.
+
+| | |
+|---|---|
+| ![Camps d'un combat d'équipe](docs/screenshots/fight-detail.jpg) | ![Statistiques et points de vie par tour](docs/screenshots/fight-analysis.jpg) |
+
+### Logs IA
+
+Les `debug()` de votre IA et ses erreurs, groupés par tour : couleurs de `debugC`, avertissements, erreurs LeekScript
+traduites, filtre « erreurs et avertissements seulement ».
+
+![Logs IA](docs/screenshots/logs.jpg)
+
+### Lancer des combats et tester son IA
+
+Combats solo ou éleveur (N combats, choix de l'adversaire : le plus faible, le plus proche en talent, le plus fort,
+aléatoire, ou lot côté Leek Wars), défis à seed fixe pour rejouer exactement la même situation, et **tests d'IA** gratuits
+contre les quatre IA de test de Leek Wars (lambda, normal, confirmé, expert), avec un bilan par IA.
+
+![Tests d'IA](docs/screenshots/launch-test.jpg)
+
+> Les tests passent par les scénarios de l'onglet Test de l'éditeur Leek Wars : la clé API peut les lancer mais pas les
+> créer. Préparez un scénario par IA (votre poireau en équipe 1, un bot avec cette IA en équipe 2).
+
+### Analyse
+
+Taux de victoire par jour, selon l'écart de niveau ou de talent, la durée, le contexte, le profil de l'adversaire et votre
+build, utilisation et efficacité des puces et des armes, bilan par adversaire. Pour comparer deux périodes (avant / après
+une modification d'IA), voir `/api/compare` dans l'[API locale](#api-locale).
+
+![Analyse](docs/screenshots/stats.jpg)
+
+### Caractéristiques et poireaux suivis
+
+Planificateur de capital avec le coût réel par paliers (+1 / +10 / +100, simulation avant de dépenser) et historique des
+builds avec leur taux de victoire. Suivez aussi n'importe quel autre poireau (ID ou lien) pour analyser ses combats.
+
+| | |
+|---|---|
+| ![Caractéristiques](docs/screenshots/characteristics.jpg) | ![Poireaux suivis](docs/screenshots/leeks.jpg) |
+
+## Installation
+
+1. Téléchargez [`LeekWarsLocal-setup.exe`](https://github.com/steodec/LeekWarsLocal/releases/latest/download/LeekWarsLocal-setup.exe)
+   et lancez-le. Il s'installe pour l'utilisateur courant, sans droits administrateur.
+   Windows SmartScreen peut afficher « Windows a protégé votre ordinateur » : « Informations complémentaires » → « Exécuter quand même ».
+2. Sur [leekwars.com](https://leekwars.com), **Paramètres → Clés API** : créez une clé avec le rôle **player**.
+3. Dans l'application, **Paramètres** → ajoutez la clé (elle est vérifiée avant d'être enregistrée), puis **Synchroniser**
+   pour importer l'historique de vos poireaux.
+
+L'application se met à jour toute seule : elle vérifie les nouvelles versions au démarrage puis toutes les 6 h et propose
+« Mettre à jour et redémarrer ». Les données sont dans `%APPDATA%\com.steodec.leekwarslocal\` (base `leekwars.db`) ; la clé
+API ne quitte pas votre machine, sauf vers l'API Leek Wars.
+
+## Développement
 
 ```bash
 npm install
 npm start                 # build de l'interface + serveur → http://127.0.0.1:3737
 ```
 
-Développement (rechargement à chaud) : `npm run server` dans un terminal, `npm run dev` dans un autre → http://localhost:1420
-(Vite redirige `/api` vers le serveur). En application de bureau : `npm run server` puis `npm run tauri dev`.
+Rechargement à chaud : `npm run server` dans un terminal, `npm run dev` dans un autre → http://localhost:1420 (Vite redirige
+`/api` vers le serveur). En application de bureau : `npm run server` puis `npm run tauri dev`.
 
-Au premier lancement, ajoutez votre **clé API Leek Wars** dans la page **Paramètres** (elle est vérifiée avant d'être enregistrée).
-Plusieurs comptes peuvent être ajoutés, comme sur Leek Wars : un sélecteur dans l'en-tête change le compte actif. Ensuite,
-puis cliquez sur **Synchroniser** pour importer l'historique de vos poireaux. Les poireaux suivis se gèrent dans la page **Poireaux**.
+- **Serveur** (`server/`) : Node sans dépendance. Il parle à l'API Leek Wars, stocke les combats dans une base **SQLite**
+  (`node:sqlite`, Node ≥ 22.13) et les analyse. `LWL_DATA_DIR` change le dossier des données ; sans compte configuré, la
+  variable `LEEKWARS_API_KEY` d'un fichier `.env` (voir `.env.example`) est importée comme premier compte.
+- **Interface** (`src/`) : Vue 3, thème et images de Leek Wars (poireaux avec peau et chapeau, puces, armes, police pixel),
+  thème clair / sombre / auto. Les images et polices sont dans `public/lw/` ; `npm run assets` les met à jour (clone léger
+  de [leek-wars/leek-wars](https://github.com/leek-wars/leek-wars), licence GPL v3, et SVG des poireaux depuis leekwars.com).
+- **Application de bureau** (`src-tauri/`) : `npm run tauri build` produit l'installeur
+  `src-tauri/target/release/bundle/nsis/LeekWars Local_<version>_x64-setup.exe`. Le serveur y est embarqué en exécutable
+  autonome (`npm run build:server` : esbuild + Node SEA) lancé comme *sidecar* : rien à installer, pas de Node. Une ancienne
+  base `data/leekwars.db` du projet est fusionnée une fois au démarrage.
+- **Copie de travail** : `npm run update` fait `git pull --ff-only`, `npm install` si les dépendances ont changé, puis
+  reconstruit l'interface. Redémarrer ensuite le serveur.
 
-Alternative : copier `.env.example` en `.env` et y mettre `LEEKWARS_API_KEY` (la clé saisie dans l'interface reste prioritaire).
-
-Les images et polices de Leek Wars sont dans `public/lw/` ; pour les mettre à jour : `npm run assets`
-(clone léger de [leek-wars/leek-wars](https://github.com/leek-wars/leek-wars), licence GPL v3, + SVG des poireaux depuis leekwars.com).
-
-## Application de bureau (.exe à partager)
+### Publier une version
 
 ```bash
-npm run tauri build
+npm run release -- minor          # ou patch, major, 1.2.3
 ```
 
-Produit l'installateur `src-tauri/target/release/bundle/nsis/LeekWars Local_<version>_x64-setup.exe` : un seul fichier à envoyer.
-Il installe l'application pour l'utilisateur courant (sans droits admin) et WebView2 si besoin.
+Incrémente la version partout, commit « Version X.Y.Z » et push. Sur une branche, la release part à la fusion dans `main` :
+le workflow `.github/workflows/release.yml` construit l'installeur signé sur `windows-latest` et crée la release `vX.Y.Z`
+(installeur, `.sig`, `latest.json` lu par l'updater, et `LeekWarsLocal-setup.exe` pour le lien de téléchargement stable).
+Il ne publie que si la release de la version de `package.json` n'existe pas encore ; sur une pull request il se contente de
+construire. Si un push sur `main` ne déclenche rien : `gh workflow run release.yml --ref main`.
 
-- Le serveur Node est compilé en exécutable autonome (`npm run build:server` : esbuild + Node SEA + postject) et embarqué comme
-  *sidecar* Tauri : l'application le lance à l'ouverture et l'arrête à la fermeture. Rien à installer (pas de Node).
-- Les données vont dans `%APPDATA%\com.steodec.leekwarslocal\` (base `leekwars.db`), comme avec `npm run server` : une seule base quel que soit le serveur lancé. Une ancienne
-  base `data/leekwars.db` du projet y est fusionnée une fois au démarrage. Chaque utilisateur saisit **sa** clé API dans Paramètres.
-- L'exécutable n'est pas signé : Windows SmartScreen peut afficher « Windows a protégé votre ordinateur » → « Informations complémentaires » → « Exécuter quand même ».
-
-## Mises à jour
-
-- **Application installée** : elle vérifie les mises à jour au démarrage puis toutes les 6 h ; une bannière propose
-  « Mettre à jour et redémarrer » (aussi dans Paramètres → Mises à jour). Les mises à jour sont signées (plugin updater Tauri) :
-  une version non signée par notre clé est refusée. Une version antérieure à 0.3.0 doit être réinstallée une fois à la main.
-- **Copie de travail** (`npm run server`) : `npm run update` fait `git pull --ff-only`, `npm install` si les dépendances ont changé,
-  puis reconstruit l'interface. Redémarrer ensuite le serveur.
-- **Publier une version** :
-
-  ```bash
-  npm run release -- minor          # ou patch, major, 1.2.3
-  ```
-
-  Incrémente la version partout, commit « Version X.Y.Z » et push. Le workflow GitHub Actions `.github/workflows/release.yml`
-  construit alors l'installeur signé sur `windows-latest` et crée la release `vX.Y.Z` (installeur, `.sig`, `latest.json` lu par
-  l'updater, et `LeekWarsLocal-setup.exe` pour le lien de téléchargement stable). Il ne publie que si la release de la version de
-  `package.json` n'existe pas encore ; sur une pull request il se contente de construire.
-- **Clé de signature** : secret `TAURI_SIGNING_PRIVATE_KEY` du dépôt, copie locale `~/.tauri/leekwarslocal.key`. **À sauvegarder** :
-  sans elle, plus aucune mise à jour ne peut être publiée pour les applis déjà installées. Ne jamais la committer.
-
-## Ce que fait l'interface
-
-| Page | Contenu |
-|---|---|
-| Tableau de bord | combats restants, taux de victoire (global / 10 / 50 derniers), série, évolution du talent, bêtes noires, derniers combats |
-| Lancer | combats solo / éleveur (N combats, choix d'adversaire : plus faible, plus proche en talent, plus fort, aléatoire, ou lot API), défis avec seed |
-| Combats | liste filtrable (résultat, contexte, type, adversaire, tag, bugs IA), import d'un combat par ID |
-| Détail | PV par tour, stats par entité (dégâts, soins, PT/PM utilisés par tour, crit., bugs, opérations), objets utilisés, tour par tour, notes et tags, « Rejouer en défi » avec le même seed, logs IA |
-| Analyse | taux de victoire par écart de niveau / talent / durée / contexte, profil de l'adversaire, build, efficacité des puces et armes, bilan par adversaire |
-| Poireaux | poireaux suivis : **les miens** (lancement, capital) ou **n'importe quel autre** pour analyse (ID ou lien, ou « + Suivre » sur un adversaire). L'ajout importe son historique ; retrait avec purge optionnelle, ordre |
-| Paramètres | **comptes Leek Wars** (ajout par clé API vérifiée, compte actif, changement de clé, retrait), taille de la base, sauvegarde |
-| Caractéristiques | base / capital investi / équipement / total, planificateur +/− avec coût réel par paliers, validation (dépense du capital), historique des builds avec leur taux de victoire |
+**Clé de signature** : secret `TAURI_SIGNING_PRIVATE_KEY` du dépôt, copie locale `~/.tauri/leekwarslocal.key`. **À sauvegarder** :
+sans elle, plus aucune mise à jour ne peut être publiée pour les applications déjà installées. Ne jamais la committer.
 
 ## API locale
 
@@ -133,3 +193,9 @@ curl -s "localhost:3737/api/compare?a=since%3D1790700000%26until%3D1790800000&b=
 - Les poireaux qui ne sont pas à moi sont en lecture seule : pas de lancement de combat ni de capital.
 - Les PT « inutilisés » sont estimés à partir du coût des objets ; les bonus de PT temporaires ne sont pas comptés.
 - Certains combats sont refusés par Leek Wars (`fight_with_secret_trophy`) et ne peuvent pas être importés.
+
+## Crédits
+
+Images, polices et textes du jeu : client [Leek Wars](https://github.com/leek-wars/leek-wars) (licence GPL v3, voir
+`public/lw/LICENSE` et `public/lw/NOTICE.md`) et [leekwars.com](https://leekwars.com). Projet non officiel, sans lien
+avec l'équipe de Leek Wars.
