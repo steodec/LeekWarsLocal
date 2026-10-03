@@ -578,6 +578,96 @@ async function launchChallenge({ leekId, targetId, seed = 0, side = "random", co
   });
 }
 
+// IA de test fournies par Leek Wars (chemins tels qu'attendus par l'éditeur, `confirmed` sans « / ») et bots adverses.
+const TEST_AIS = {
+  lambda: { path: "/lambda", name: "Lambda" },
+  normal: { path: "/normal", name: "Normal" },
+  confirmed: { path: "confirmed", name: "Confirmé" },
+  expert: { path: "/expert", name: "Expert" },
+};
+const TEST_BOTS = {
+  "-1": { name: "Domingo", profile: "force" },
+  "-2": { name: "Betalpha", profile: "magie" },
+  "-3": { name: "Tisma", profile: "sagesse" },
+  "-4": { name: "Guj", profile: "vie" },
+  "-5": { name: "Hachess", profile: "résistance" },
+  "-6": { name: "Rex", profile: "science" },
+};
+
+// La clé API (rôle « player ») peut lire les scénarios et les lancer, mais pas les créer ni les modifier
+// (scope « session ») : on réutilise donc les scénarios préparés dans l'éditeur Leek Wars.
+const testAiKey = (path) => {
+  const key = String(path ?? "").replace(/^\/+/, "");
+  return TEST_AIS[key] ? key : null;
+};
+
+function describeScenario(s, leekNames) {
+  const member = (l) => ({
+    id: l.id, ai: l.ai ?? null, aiKey: testAiKey(l.ai),
+    name: l.id < 0 ? TEST_BOTS[l.id]?.name ?? `Bot ${l.id}` : leekNames.get(l.id) ?? `#${l.id}`,
+  });
+  return { id: s.id, name: s.name, type: s.type, seed: s.seed ?? null, map: s.map ?? null, team1: (s.team1 ?? []).map(member), team2: (s.team2 ?? []).map(member) };
+}
+
+/** Scénarios du compte, et pour chaque IA de test celui où `leekId` affronte uniquement des bots qui la jouent. */
+async function testScenariosFor(client, account, leekId) {
+  const { scenarios } = await client.testScenarios();
+  const f = await farmerOf(account);
+  const leekNames = new Map(Object.values(f.leeks ?? {}).map((l) => [l.id, l.name]));
+  const list = Object.values(scenarios ?? {}).map((s) => describeScenario(s, leekNames)).sort((a, b) => a.id - b.id);
+  const byAi = {};
+  for (const key of Object.keys(TEST_AIS)) {
+    byAi[key] = list.find((s) => s.team1.some((l) => l.id === leekId) && s.team2.length && s.team2.every((l) => l.id < 0 && l.aiKey === key)) ?? null;
+  }
+  return { scenarios: list, byAi };
+}
+
+async function launchTest({ leekId, ais, scenarioIds, count = 1, aiPath }) {
+  leekId = Number(leekId);
+  if (!leekId) throw new HttpError(400, "leekId requis");
+  count = clamp(Number(count) || 1, 1, 50);
+  const { client, account, leek } = await assertOwned(leekId);
+  const { scenarios, byAi } = await testScenariosFor(client, account, leekId);
+  // Scénarios à jouer : ceux demandés explicitement, sinon celui de chaque IA de test demandée (toutes par défaut).
+  let plan;
+  if (scenarioIds?.length) {
+    plan = scenarioIds.map(Number).map((id) => {
+      const s = scenarios.find((x) => x.id === id);
+      if (!s) throw new HttpError(404, `Scénario de test #${id} introuvable sur ${account.name}`);
+      if (!s.team1.some((l) => l.id === leekId)) throw new HttpError(400, `${leek.name} n'est pas dans l'équipe 1 du scénario « ${s.name} »`);
+      return { scenario: s, aiKey: s.team2.find((l) => l.aiKey)?.aiKey ?? null };
+    });
+  } else {
+    const keys = (Array.isArray(ais) ? ais : ais ? String(ais).split(",") : Object.keys(TEST_AIS)).map((k) => String(k).trim());
+    const unknown = keys.filter((k) => !TEST_AIS[k]);
+    if (unknown.length || !keys.length) throw new HttpError(400, `IA de test inconnue : ${unknown.join(", ") || "aucune"} (${Object.keys(TEST_AIS).join(", ")})`);
+    const missing = keys.filter((k) => !byAi[k]);
+    if (missing.length) {
+      throw new HttpError(409, `Aucun scénario de test pour ${leek.name} contre ${missing.map((k) => TEST_AIS[k].path).join(", ")} : `
+        + `dans l'éditeur Leek Wars (onglet Test), créez un scénario avec ${leek.name} en équipe 1 et un bot avec cette IA en équipe 2 `
+        + `(la clé API ne permet pas de créer les scénarios).`, "no_test_scenario");
+    }
+    plan = keys.map((k) => ({ scenario: byAi[k], aiKey: k }));
+  }
+  return createJob("test", { leekId, ais: plan.map((p) => p.aiKey), scenarios: plan.map((p) => p.scenario.id), count, account: account.name }, async (job, log) => {
+    job.progress.total = plan.length * count;
+    const ids = [];
+    const failure = await launchLoop(plan.length * count, ids, log, async () => {
+      const { scenario, aiKey } = plan[Math.floor(ids.length / count)];
+      // IA jouée par mon poireau : celle demandée, sinon celle équipée (l'IA du scénario dépend du fichier ouvert dans l'éditeur).
+      const path = aiPath || leek.ai_path || scenario.team1.find((l) => l.id === leekId)?.ai;
+      if (!path) throw new HttpError(409, `${leek.name} n'a pas d'IA équipée : précisez aiPath`);
+      const [id] = extractFightIds(await client.startTestFight(scenario.id, path));
+      const bots = scenario.team2.map((l) => l.name).join(", ");
+      job.fights.push({ id, opponent: { id: scenario.team2[0]?.id, name: bots }, testAi: aiKey, scenario: { id: scenario.id, name: scenario.name, seed: scenario.seed }, result: "pending" });
+      log(`Test ${id} lancé : ${path} contre ${bots}${aiKey ? ` (IA ${TEST_AIS[aiKey].name})` : ""}, scénario « ${scenario.name} »`);
+      return id;
+    });
+    await waitAndImport(job, log, ids, "test");
+    if (failure) throw failure;
+  });
+}
+
 let syncJob = null;
 async function sync({ leekIds, limit = 500, farmerFights = true } = {}) {
   if (syncJob && syncJob.status === "running") return syncJob;
@@ -910,6 +1000,19 @@ route("POST", "/api/fights/solo", "Lancer des combats solo (poireau d'un de mes 
 route("POST", "/api/fights/farmer", "Lancer des combats éleveur. Body : {accountId?, targetId?, strategy?, count?, batch?}", ({ body }) => jobView(launchFarmer(body)));
 route("POST", "/api/fights/challenge", "Lancer des défis. Body : {leekId, targetId, seed?, side?: random|left|right, count?}", async ({ body }) =>
   jobView(await launchChallenge(body)));
+route("GET", "/api/fights/test", "IA de test, bots et scénarios de test (éditeur Leek Wars). Query : leekId → scénario retenu pour chaque IA de test", async ({ query }) => {
+  const leekId = Number(query.leekId) || null;
+  const { client, account } = leekId ? await assertOwned(leekId) : { account: activeAccount(), client: lwActive() };
+  const { scenarios, byAi } = await testScenariosFor(client, account, leekId);
+  return {
+    ais: Object.entries(TEST_AIS).map(([key, a]) => ({ key, ...a, scenario: leekId ? byAi[key] : undefined })),
+    bots: Object.entries(TEST_BOTS).map(([id, b]) => ({ id: Number(id), ...b })),
+    scenarios,
+    account: account.name,
+  };
+});
+route("POST", "/api/fights/test", "Combats de test d'IA contre les bots (gratuits, ne consomment pas les combats du jour) via les scénarios de l'éditeur. Body : {leekId, ais?: (lambda|normal|confirmed|expert)[] (toutes par défaut), scenarioIds?, count?: par scénario, aiPath?}", async ({ body }) =>
+  jobView(await launchTest(body)));
 
 route("POST", "/api/sync", "Importer l'historique Leek Wars des poireaux suivis et de tous mes comptes. Body : {leekIds?, limit?, farmerFights?}", async ({ body }) => jobView(await sync(body)));
 route("POST", "/api/fights/import", "Importer des combats précis. Body : {ids: number[], force?}", async ({ body }) => {

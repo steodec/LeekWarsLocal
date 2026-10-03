@@ -4,7 +4,7 @@ import { state } from "../state";
 import ResultBadge from "./ResultBadge.vue";
 
 const open = ref(true);
-const KIND: Record<string, string> = { solo: "Combats solo", farmer: "Combats éleveur", challenge: "Défis", sync: "Synchronisation" };
+const KIND: Record<string, string> = { solo: "Combats solo", farmer: "Combats éleveur", challenge: "Défis", test: "Tests d'IA", sync: "Synchronisation" };
 // Tâches en cours + celles terminées depuis moins de 2 minutes.
 const visible = computed(() => state.jobs.filter((j) => j.status === "running" || Date.now() - j.startedAt < 120_000).slice(0, 4));
 </script>

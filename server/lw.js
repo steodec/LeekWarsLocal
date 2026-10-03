@@ -134,6 +134,9 @@ export class LeekWarsClient {
   startSoloChallenge(leekId, targetId, seed = 0, side = "random") {
     return this.post("garden/start-solo-challenge", { leek_id: leekId, target_id: targetId, seed, side });
   }
+  // Tests d'IA : la clé API lit et lance les scénarios de l'éditeur (leur édition exige une session).
+  testScenarios() { return this.get("test-scenario/get-all"); }
+  startTestFight(scenarioId, aiPath) { return this.post("ai/test-scenario", { scenario_id: scenarioId, ai_id: aiPath }); }
   chips() { return this.get("chip/get-all"); }
   weapons() { return this.get("weapon/get-all"); }
 }

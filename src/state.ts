@@ -30,7 +30,11 @@ export interface Job {
   kind: string;
   status: "running" | "done" | "error";
   progress: { done: number; total: number };
-  fights: { id: number; opponent: { id: number; name?: string; level?: number; talent?: number } | null; result: string; turns?: number }[];
+  fights: {
+    id: number; opponent: { id: number; name?: string; level?: number; talent?: number } | null; result: string; turns?: number;
+    /** Combats de test : IA du bot adverse et scénario de l'éditeur joué. */
+    testAi?: string | null; scenario?: { id: number; name: string; seed: number | null };
+  }[];
   error: string | null;
   lastLog: string | null;
   startedAt: number;

@@ -6,7 +6,7 @@ import { fmtPct } from "../format";
 import ResultBadge from "../components/ResultBadge.vue";
 import LeekImage from "../components/LeekImage.vue";
 
-type Mode = "solo" | "farmer" | "challenge";
+type Mode = "solo" | "farmer" | "challenge" | "test";
 const mode = ref<Mode>("solo");
 // Seuls mes poireaux peuvent combattre : un poireau suivi pour analyse n'est pas proposé ici.
 const ownLeeks = computed(() => (state.status?.leeks ?? []).filter((l) => l.owned));
@@ -35,9 +35,43 @@ const currentAccount = computed(() => {
 const fightsLeft = computed(() => currentAccount.value?.garden?.fights ?? 0);
 const lastJob = computed<Job | undefined>(() => state.jobs.find((j) => j.id === lastJobId.value));
 
+// Tests d'IA : un scénario de l'éditeur Leek Wars par IA de test (mon poireau contre des bots qui la jouent).
+interface TestMember { id: number; name: string; ai: string | null; aiKey: string | null }
+interface TestScenario { id: number; name: string; seed: number | null; team1: TestMember[]; team2: TestMember[] }
+interface TestAi { key: string; path: string; name: string; scenario: TestScenario | null }
+const testAis = ref<TestAi[]>([]);
+const testSelected = ref<Record<string, boolean>>({ lambda: true, normal: true, confirmed: true, expert: true });
+const testCount = ref(1);
+const testPlayable = computed(() => testAis.value.filter((a) => a.scenario && testSelected.value[a.key]));
+const testMissing = computed(() => testAis.value.filter((a) => !a.scenario));
+
+async function loadTestScenarios() {
+  if (!leekId.value) return;
+  loadingOpp.value = true;
+  try {
+    testAis.value = (await api.get(`/api/fights/test?leekId=${leekId.value}`)).ais;
+  } catch (e: any) {
+    error.value = e.message;
+  } finally {
+    loadingOpp.value = false;
+  }
+}
+
+/** Bilan du dernier lancement de test, par IA adverse. */
+const testRecap = computed(() => {
+  const out: Record<string, { win: number; loss: number; draw: number; pending: number }> = {};
+  for (const f of lastJob.value?.kind === "test" ? lastJob.value.fights : []) {
+    const r = (out[f.testAi ?? "?"] ??= { win: 0, loss: 0, draw: 0, pending: 0 });
+    r[f.result as keyof typeof r]++;
+  }
+  return out;
+});
+const testAiName = (key?: string | null) => testAis.value.find((a) => a.key === key)?.name ?? key ?? "?";
+
 async function loadOpponents() {
   opponents.value = [];
   error.value = "";
+  if (mode.value === "test") return loadTestScenarios();
   if (mode.value === "challenge") return;
   if (mode.value === "solo" && !leekId.value) return;
   loadingOpp.value = true;
@@ -64,7 +98,9 @@ async function launch(targetId?: number) {
   error.value = "";
   try {
     let job: Job;
-    if (mode.value === "challenge") {
+    if (mode.value === "test") {
+      job = await api.post("/api/fights/test", { leekId: leekId.value, ais: testPlayable.value.map((a) => a.key), count: testCount.value });
+    } else if (mode.value === "challenge") {
       job = await api.post("/api/fights/challenge", {
         leekId: leekId.value,
         targetId: Number(targetId ?? challenge.value.targetId),
@@ -98,13 +134,15 @@ const STRATS: Record<string, string> = {
   <section class="row">
     <h1>Lancer des combats</h1>
     <span class="spacer"></span>
-    <span class="secondary">Combats restants<template v-if="currentAccount"> ({{ currentAccount.name }})</template> : <b class="mono">{{ fightsLeft }}</b></span>
+    <span v-if="mode === 'test'" class="secondary">Tests gratuits : les combats du jour ne sont pas consommés</span>
+    <span v-else class="secondary">Combats restants<template v-if="currentAccount"> ({{ currentAccount.name }})</template> : <b class="mono">{{ fightsLeft }}</b></span>
   </section>
 
   <div class="tabs">
     <button :class="{ on: mode === 'solo' }" @click="mode = 'solo'">Solo</button>
     <button :class="{ on: mode === 'farmer' }" @click="mode = 'farmer'">Éleveur</button>
     <button :class="{ on: mode === 'challenge' }" @click="mode = 'challenge'">Défi</button>
+    <button :class="{ on: mode === 'test' }" @click="mode = 'test'">Test IA</button>
   </div>
 
   <div v-if="error" class="error">{{ error }}</div>
@@ -124,7 +162,7 @@ const STRATS: Record<string, string> = {
         </select>
       </label>
 
-      <template v-if="mode !== 'challenge'">
+      <template v-if="mode === 'solo' || mode === 'farmer'">
         <label class="field">
           Nombre de combats
           <input type="number" v-model.number="count" min="1" :max="Math.max(1, fightsLeft)" style="width: 90px" />
@@ -144,6 +182,17 @@ const STRATS: Record<string, string> = {
         </button>
       </template>
 
+      <template v-else-if="mode === 'test'">
+        <label class="field">
+          Combats par IA
+          <input type="number" v-model.number="testCount" min="1" max="50" style="width: 90px" />
+        </label>
+        <span class="spacer"></span>
+        <button class="primary" :disabled="busy || !leekId || !testPlayable.length || testCount < 1" @click="launch()">
+          Lancer {{ testPlayable.length * testCount }} test{{ testPlayable.length * testCount > 1 ? "s" : "" }}
+        </button>
+      </template>
+
       <template v-else>
         <label class="field">ID du poireau adverse<input v-model="challenge.targetId" placeholder="ex. 134873" style="width: 130px" /></label>
         <label class="field">Seed (0 = aléatoire)<input v-model="challenge.seed" type="number" style="width: 120px" /></label>
@@ -160,18 +209,45 @@ const STRATS: Record<string, string> = {
       Un défi oppose votre poireau à un poireau précis. Avec un seed fixe, le combat est reproductible : pratique pour tester une
       modification d'IA sur exactement la même situation.
     </p>
+    <template v-if="mode === 'test'">
+      <div class="test-ais">
+        <label v-for="a in testAis" :key="a.key" class="test-ai" :class="{ off: !a.scenario }">
+          <input type="checkbox" v-model="testSelected[a.key]" :disabled="!a.scenario" />
+          <span class="display">{{ a.name }}</span> <span class="mono muted small">{{ a.path }}</span>
+          <span v-if="a.scenario" class="small secondary">
+            « {{ a.scenario.name }} » · contre {{ a.scenario.team2.map((l) => l.name).join(", ") }}
+            <template v-if="a.scenario.seed"> · seed {{ a.scenario.seed }}</template>
+          </span>
+          <span v-else class="small muted">aucun scénario</span>
+        </label>
+        <div v-if="loadingOpp && !testAis.length" class="small muted">Chargement des scénarios…</div>
+      </div>
+      <p class="small muted">
+        Chaque IA de test se joue via un scénario de l'éditeur Leek Wars (onglet Test) où ce poireau est en équipe 1 et un bot avec
+        cette IA en équipe 2. Mon poireau y joue son IA équipée. La clé API peut lancer ces scénarios mais pas les créer :
+        <template v-if="testMissing.length">créez-en un pour {{ testMissing.map((a) => a.path).join(", ") }} dans l'éditeur, puis
+          <a href="#" @click.prevent="loadTestScenarios">rechargez</a>.</template>
+        <template v-else>seed, carte et bot se règlent dans l'éditeur.</template>
+      </p>
+    </template>
   </section>
 
   <section v-if="lastJob" class="card">
     <h2>Dernier lancement</h2>
     <div class="small muted" style="margin-bottom: 8px">{{ lastJob.progress.done }}/{{ lastJob.progress.total }} terminé(s) · {{ lastJob.error ?? lastJob.lastLog }}</div>
+    <div v-if="lastJob.kind === 'test'" class="row recap">
+      <span v-for="(r, key) in testRecap" :key="key" class="tag">
+        {{ testAiName(key as string) }} : <b class="good">{{ r.win }}V</b> <b class="bad">{{ r.loss }}D</b><template v-if="r.draw"> {{ r.draw }}N</template><template v-if="r.pending"> · {{ r.pending }} en cours</template>
+      </span>
+    </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Combat</th><th>Adversaire</th><th class="num">Tours</th><th>Résultat</th></tr></thead>
+        <thead><tr><th>Combat</th><th>Adversaire</th><th v-if="lastJob.kind === 'test'">IA</th><th class="num">Tours</th><th>Résultat</th></tr></thead>
         <tbody>
           <tr v-for="f in lastJob.fights" :key="f.id">
             <td><a :href="'#/fight/' + f.id">#{{ f.id }}</a></td>
             <td>{{ f.opponent?.name ?? "?" }} <span class="muted small" v-if="f.opponent?.talent">talent {{ f.opponent.talent }}</span></td>
+            <td v-if="lastJob.kind === 'test'">{{ testAiName(f.testAi) }} <span class="muted small" v-if="f.scenario">« {{ f.scenario.name }} »</span></td>
             <td class="num">{{ f.turns ?? "–" }}</td>
             <td><ResultBadge :result="f.result" /></td>
           </tr>
@@ -180,7 +256,7 @@ const STRATS: Record<string, string> = {
     </div>
   </section>
 
-  <section v-if="mode !== 'challenge'" class="card">
+  <section v-if="mode === 'solo' || mode === 'farmer'" class="card">
     <div class="row" style="margin-bottom: 8px">
       <h2>Adversaires proposés</h2>
       <span class="spacer"></span>
@@ -226,4 +302,10 @@ const STRATS: Record<string, string> = {
 .tabs button.on { background: var(--surface-3); border-color: var(--text-muted); }
 .form { align-items: flex-end; gap: 14px; }
 .check { gap: 6px; padding-bottom: 6px; }
+.test-ais { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.test-ai { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.test-ai.off { opacity: 0.6; }
+.recap { gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.good { color: var(--good); }
+.bad { color: var(--critical); }
 </style>
