@@ -151,6 +151,11 @@ sans elle, plus aucune mise à jour ne peut être publiée pour les applications
 
 Doc auto-générée : `GET http://127.0.0.1:3737/api`.
 
+Le serveur n'écoute qu'en local et refuse (403 `forbidden_origin`) les requêtes envoyées par une page web autre que
+l'interface (application, Vite en dev, interface servie par le serveur) : un site ouvert dans le navigateur ne peut pas
+piloter l'API. Les clients sans navigateur (curl, scripts) ne sont pas concernés. Pour autoriser une autre origine :
+`LWL_ALLOWED_ORIGINS=https://exemple.test,http://localhost:5173`.
+
 | Méthode | Route | Description |
 |---|---|---|
 | GET | `/api/status` | éleveur, poireaux, combats restants, tâches en cours |
@@ -205,6 +210,12 @@ curl -s "localhost:3737/api/compare?a=since%3D1790700000%26until%3D1790800000&b=
 - Les poireaux qui ne sont pas à moi sont en lecture seule : pas de lancement de combat ni de capital.
 - Les PT « inutilisés » sont estimés à partir du coût des objets ; les bonus de PT temporaires ne sont pas comptés.
 - Certains combats sont refusés par Leek Wars (`fight_with_secret_trophy`) et ne peuvent pas être importés.
+
+## Licence
+
+LeekWars Local est un logiciel libre distribué sous licence [GNU GPL v3](LICENSE) : vous pouvez l'utiliser, l'étudier,
+le modifier et le redistribuer, à condition que les versions modifiées que vous distribuez restent sous la même licence.
+Les contributions (issues, pull requests) sont les bienvenues.
 
 ## Crédits
 
