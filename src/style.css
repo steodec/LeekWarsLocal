@@ -263,6 +263,7 @@ tr.clickable { cursor: pointer; }
 
 /* Poireau + nom, utilisé dans les listes (une cellule de tableau garde son display) */
 .leek-cell { white-space: nowrap; }
+.matchup-cell { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
 .leek-cell > .leek-image, .leek-cell > .dot { margin-right: 8px; }
 
 @media (max-width: 640px) {

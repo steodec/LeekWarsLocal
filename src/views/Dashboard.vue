@@ -4,7 +4,7 @@ import { api, qs, CONTEXTS, type FightSummary } from "../api";
 import { state, go } from "../state";
 import { fmtDate, fmtNum, fmtPct } from "../format";
 import StatTile from "../components/StatTile.vue";
-import ResultBadge from "../components/ResultBadge.vue";
+import FightMatchup from "../components/FightMatchup.vue";
 import LineChart from "../components/LineChart.vue";
 import LeekImage from "../components/LeekImage.vue";
 
@@ -45,7 +45,6 @@ const streakLabel = computed(() => {
   return `${s.count} ${word}${s.count > 1 ? "s" : ""}`;
 });
 const shortDate = (ts: number) => new Date(ts * 1000).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
-const opp = (f: FightSummary) => f.opponents.map((o) => o.name).join(", ") || "?";
 </script>
 
 <template>
@@ -104,12 +103,11 @@ const opp = (f: FightSummary) => f.opponents.map((o) => o.name).join(", ") || "?
     </div>
     <div class="table-wrap" v-if="recent.length">
       <table>
-        <thead><tr><th>Résultat</th><th>Date</th><th>Adversaire</th><th>Contexte</th><th class="num">Tours</th><th class="num">Dégâts infl./subis</th><th class="num">Talent</th></tr></thead>
+        <thead><tr><th>Combat</th><th>Date</th><th>Contexte</th><th class="num">Tours</th><th class="num">Dégâts infl./subis</th><th class="num">Talent</th></tr></thead>
         <tbody>
           <tr v-for="f in recent" :key="f.id" class="clickable" @click="go('#/fight/' + f.id)">
-            <td><ResultBadge :result="f.result" /></td>
+            <td class="matchup-cell"><FightMatchup :fight="f" /><span v-if="f.type === 0 && f.opponents[0]" class="muted small">niv. {{ f.opponents[0].level }}</span></td>
             <td class="mono">{{ fmtDate(f.date) }}</td>
-            <td class="leek-cell"><LeekImage v-if="f.opponents[0]" :leek="f.opponents[0]" head :size="28" />{{ opp(f) }} <span class="muted small">niv. {{ f.opponents[0]?.level }}</span></td>
             <td class="secondary">{{ CONTEXTS[f.context] ?? f.context }}</td>
             <td class="num">{{ f.turns ?? "–" }}</td>
             <td class="num">{{ fmtNum(f.me?.damageDealt) }} / {{ fmtNum(f.me?.damageTaken) }}</td>

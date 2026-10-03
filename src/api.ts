@@ -87,6 +87,8 @@ export interface FightSummary {
   leeks1: LeekRef[];
   leeks2: LeekRef[];
   mySide: 1 | 2 | null;
+  /** Nom des camps (poireau, « (éleveur) », « [équipe] ») ; null en battle royale. */
+  sideNames?: [string | null, string | null] | null;
   myLeeks: number[];
   opponents: LeekRef[];
   result: "win" | "loss" | "draw" | "pending";
@@ -104,5 +106,5 @@ export interface FightSummary {
 }
 
 export const CONTEXTS: Record<number, string> = { 0: "test", 1: "défi", 2: "potager", 3: "tournoi", 4: "battle royale" };
-export const TYPES: Record<number, string> = { 0: "solo", 1: "éleveur", 2: "équipe", 3: "battle royale", 4: "boss" };
+export const TYPES: Record<number, string> = { 0: "solo", 1: "éleveur", 2: "équipe", 3: "battle royale", 4: "boss", 5: "guerre", 6: "chasse au trésor", 7: "colosse" };
 export const RESULTS: Record<string, string> = { win: "Victoire", loss: "Défaite", draw: "Égalité", pending: "En cours" };
