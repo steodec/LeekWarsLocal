@@ -117,6 +117,12 @@ await pool(names, 8, async (name) => {
 });
 console.log(`leek/ : ${ok}/${names.length} SVG`);
 
+// Messages des erreurs LeekScript (logs de combat de type 6 à 8 : clé `error_<code>`, paramètres {0}, {1}…).
+const lsLang = await (await fetchOk("https://raw.githubusercontent.com/leek-wars/leek-wars/master/src/lang/fr/leekscript.json")).json();
+const lsErrors = Object.fromEntries(Object.entries(lsLang).filter(([k]) => /^error_\d+$/.test(k)).map(([k, v]) => [k.slice(6), v]));
+fs.writeFileSync(path.join(OUT, "leekscript-errors.json"), JSON.stringify(lsErrors));
+console.log(`leekscript-errors.json : ${Object.keys(lsErrors).length} message(s)`);
+
 const license = path.join(src, "LICENSE");
 if (fs.existsSync(license)) fs.copyFileSync(license, path.join(OUT, "LICENSE"));
 else fs.writeFileSync(path.join(OUT, "LICENSE"), await (await fetchOk("https://raw.githubusercontent.com/leek-wars/leek-wars/master/LICENSE")).text());
