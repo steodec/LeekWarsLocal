@@ -1335,21 +1335,48 @@ const ready = migrateKeys()
   .then(() => reanalyze())
   .catch((e) => console.error("Initialisation :", e.message));
 
+// Accès à l'API depuis un navigateur : seulement l'interface (application Tauri, Vite en dev, ce serveur lui-même).
+// Sans ce filtre, n'importe quel site ouvert dans le navigateur pourrait piloter l'API locale (lancer des combats,
+// dépenser du capital, des analyses IA payantes…). Les clients sans navigateur (curl, scripts) n'envoient pas
+// d'en-tête Origin et restent acceptés. LWL_ALLOWED_ORIGINS (séparées par des virgules) en ajoute d'autres.
+const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
+const ALLOWED_ORIGINS = new Set([
+  "tauri://localhost", "http://tauri.localhost", "https://tauri.localhost",
+  "http://localhost:1420", "http://127.0.0.1:1420",
+  ...[...LOOPBACK].map((h) => `http://${h}:${PORT}`),
+  ...(process.env.LWL_ALLOWED_ORIGINS ?? "").split(",").map((o) => o.trim()).filter(Boolean),
+]);
+
+/** Refus (message) d'une requête d'API venue d'ailleurs que de l'interface, sinon null. */
+function rejectedAccess(req) {
+  // Rebinding DNS : un domaine qui pointerait vers 127.0.0.1 garderait son propre nom dans Host.
+  const host = String(req.headers.host ?? "").replace(/:\d+$/, "");
+  if (LOOPBACK.has(HOST) && !LOOPBACK.has(host)) return `Hôte non autorisé : ${host || "(absent)"}`;
+  const origin = req.headers.origin;
+  if (origin) return ALLOWED_ORIGINS.has(origin) ? null : `Origine non autorisée : ${origin}`;
+  // Requêtes sans Origin émises par une autre page (balise <img>, lien…) : signalées par Sec-Fetch-Site.
+  return req.headers["sec-fetch-site"] === "cross-site" ? "Requête intersite non autorisée" : null;
+}
+
 const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host}`);
+  const url = new URL(req.url, "http://127.0.0.1");
+  if (!url.pathname.startsWith("/api")) return serveStatic(req, res, url.pathname);
+  const origin = req.headers.origin;
+  const cors = origin && ALLOWED_ORIGINS.has(origin) ? { "Access-Control-Allow-Origin": origin, Vary: "Origin" } : { Vary: "Origin" };
   const send = (status, data) => {
-    res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Access-Control-Allow-Origin": "*" });
+    res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", ...cors });
     res.end(JSON.stringify(data));
   };
+  const denied = rejectedAccess(req);
+  if (denied) return send(403, { error: `${denied}. L'API locale n'accepte que l'interface LeekWars Local et les clients sans navigateur.`, code: "forbidden_origin" });
   if (req.method === "OPTIONS") {
     res.writeHead(204, {
-      "Access-Control-Allow-Origin": "*",
+      ...cors,
       "Access-Control-Allow-Methods": "GET,POST,PATCH,PUT,DELETE,OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type",
     });
     return res.end();
   }
-  if (!url.pathname.startsWith("/api")) return serveStatic(req, res, url.pathname);
   try {
     await ready;
     for (const r of routes) {

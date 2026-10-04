@@ -6,6 +6,7 @@ Outil local de gestion/analyse des combats Leek Wars. Voir README.md pour le dé
 
 - Serveur : `npm run server` (ou `npm start` pour builder l'UI aussi) → `http://127.0.0.1:3737`. Vérifier avec `curl -s localhost:3737/api/status`.
 - Doc des routes : `curl -s localhost:3737/api`.
+- Accès : les requêtes `/api` avec un en-tête `Origin` hors liste blanche (Tauri, Vite :1420, le serveur lui-même, `LWL_ALLOWED_ORIGINS`) ou un `Host` non local sont refusées en 403 `forbidden_origin` (`rejectedAccess` dans `server/index.js`). curl et les scripts (sans Origin) passent.
 - Comptes : plusieurs comptes Leek Wars (table `accounts`, une clé API chacun ; `GET/POST /api/accounts`). Un compte est actif (`PUT /api/accounts/active`) : vue éleveur par défaut (`?account=<farmerId>` pour un autre) et combats éleveur. Les actions sur un poireau utilisent automatiquement le compte propriétaire. Sans compte : 401 `code: "no_api_key"`. Ne jamais afficher une clé en entier.
 - Poireaux suivis : `GET /api/leeks` (table `tracked_leeks`). `owned: false` = poireau d'un autre joueur suivi pour analyse (pas de lancement ni de capital). `POST /api/leeks/tracked {id}` suit n'importe quel poireau et importe son historique.
 - Perspectives : `/api/fights`, `/api/stats` sans `leek` = mon éleveur ; avec `?leek=<id>` = du point de vue de ce poireau suivi. `/api/fights/:id?leek=<id>` accepte n'importe quel participant.
