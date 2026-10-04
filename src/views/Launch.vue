@@ -5,8 +5,11 @@ import { state, trackJob, refreshStatus, type Job } from "../state";
 import { fmtPct } from "../format";
 import ResultBadge from "../components/ResultBadge.vue";
 import LeekImage from "../components/LeekImage.vue";
+import LaunchTeam from "../components/LaunchTeam.vue";
+import LaunchBoss from "../components/LaunchBoss.vue";
+import ArenaPanel from "../components/ArenaPanel.vue";
 
-type Mode = "solo" | "farmer" | "challenge" | "test";
+type Mode = "solo" | "farmer" | "challenge" | "test" | "team" | "boss" | "arena";
 const mode = ref<Mode>("solo");
 // Seuls mes poireaux peuvent combattre : un poireau suivi pour analyse n'est pas proposé ici.
 const ownLeeks = computed(() => (state.status?.leeks ?? []).filter((l) => l.owned));
@@ -72,7 +75,7 @@ async function loadOpponents() {
   opponents.value = [];
   error.value = "";
   if (mode.value === "test") return loadTestScenarios();
-  if (mode.value === "challenge") return;
+  if (mode.value !== "solo" && mode.value !== "farmer") return;
   if (mode.value === "solo" && !leekId.value) return;
   loadingOpp.value = true;
   try {
@@ -135,6 +138,7 @@ const STRATS: Record<string, string> = {
     <h1>Lancer des combats</h1>
     <span class="spacer"></span>
     <span v-if="mode === 'test'" class="secondary">Tests gratuits : les combats du jour ne sont pas consommés</span>
+    <span v-else-if="mode === 'team' || mode === 'arena'"></span>
     <span v-else class="secondary">Combats restants<template v-if="currentAccount"> ({{ currentAccount.name }})</template> : <b class="mono">{{ fightsLeft }}</b></span>
   </section>
 
@@ -143,11 +147,18 @@ const STRATS: Record<string, string> = {
     <button :class="{ on: mode === 'farmer' }" @click="mode = 'farmer'">Éleveur</button>
     <button :class="{ on: mode === 'challenge' }" @click="mode = 'challenge'">Défi</button>
     <button :class="{ on: mode === 'test' }" @click="mode = 'test'">Test IA</button>
+    <button :class="{ on: mode === 'team' }" @click="mode = 'team'">Équipe</button>
+    <button :class="{ on: mode === 'boss' }" @click="mode = 'boss'">Boss</button>
+    <button :class="{ on: mode === 'arena' }" @click="mode = 'arena'">Arène</button>
   </div>
 
   <div v-if="error" class="error">{{ error }}</div>
 
-  <section class="card">
+  <LaunchTeam v-if="mode === 'team'" @launched="(j) => (lastJobId = j.id)" />
+  <LaunchBoss v-else-if="mode === 'boss'" @launched="(j) => (lastJobId = j.id)" />
+  <ArenaPanel v-else-if="mode === 'arena'" />
+
+  <section v-else class="card">
     <div class="row form">
       <label v-if="mode === 'farmer' && accounts.length > 1" class="field">
         Compte
@@ -232,7 +243,7 @@ const STRATS: Record<string, string> = {
     </template>
   </section>
 
-  <section v-if="lastJob" class="card">
+  <section v-if="lastJob && mode !== 'arena'" class="card">
     <h2>Dernier lancement</h2>
     <div class="small muted" style="margin-bottom: 8px">{{ lastJob.progress.done }}/{{ lastJob.progress.total }} terminé(s) · {{ lastJob.error ?? lastJob.lastLog }}</div>
     <div v-if="lastJob.kind === 'test'" class="row recap">

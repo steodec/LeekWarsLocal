@@ -137,6 +137,24 @@ export class LeekWarsClient {
   // Tests d'IA : la clé API lit et lance les scénarios de l'éditeur (leur édition exige une session).
   testScenarios() { return this.get("test-scenario/get-all"); }
   startTestFight(scenarioId, aiPath) { return this.post("ai/test-scenario", { scenario_id: scenarioId, ai_id: aiPath }); }
+  // Équipe : compositions de mon équipe (garden/get → my_compositions).
+  compositionOpponents(compositionId) { return this.get("garden/get-composition-opponents", compositionId); }
+  startTeamFight(compositionId, targetId) { return this.post("garden/start-team-fight", { composition_id: compositionId, target_id: targetId }); }
+  startTeamFightBatch(compositionId, count) { return this.post("garden/start-team-fight-batch", { composition_id: compositionId, count }); }
+  // Boss : `participants` = ids de mes poireaux ; les lots sont réservés à Leek Wars+.
+  bosses() { return this.get("boss/get-all"); }
+  startBossFight(bossId, participants) { return this.post("garden/start-boss-fight", { boss_id: bossId, participants }); }
+  startBossFightBatch(bossId, participants, count) { return this.post("garden/start-boss-fight-batch", { boss_id: bossId, participants, count }); }
+  // Arène : l'inscription expire (`expires_in`), il faut la renouveler pour rester dans la salle d'attente.
+  arena() { return this.get("arena/get"); }
+  arenaRegister(leekId, preference) { return this.post("arena/register", { leek_id: leekId, preference }); }
+  arenaLeave() { return this.post("arena/leave", {}); }
+  // Données publiques.
+  tournament(id) { return this.get("tournament/get", id); }
+  /** Classement : `category` leek | farmer | team | level-<N> (poireaux de niveau ≤ N)… ; `country` "null" = tous. */
+  ranking(category, order, page = 1, country = "null") { return this.get("ranking/get", category, order, page, country); }
+  /** Classement d'un boss ; `mode` 1 = tours, 2 = poireaux, 3 = premiers, 4 = puissance. */
+  bossRanking(bossId, mode = 1, page = 1) { return this.get("ranking/boss", bossId, mode, page); }
   chips() { return this.get("chip/get-all"); }
   weapons() { return this.get("weapon/get-all"); }
 }

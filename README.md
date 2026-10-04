@@ -79,6 +79,34 @@ contre les quatre IA de test de Leek Wars (lambda, normal, confirmé, expert), a
 > Les tests passent par les scénarios de l'onglet Test de l'éditeur Leek Wars : la clé API peut les lancer mais pas les
 > créer. Préparez un scénario par IA (votre poireau en équipe 1, un bot avec cette IA en équipe 2).
 
+La même page lance aussi :
+
+- les **combats d'équipe** : une composition de votre équipe contre celles que propose Leek Wars, avec le compte de votre
+  choix quand plusieurs de vos comptes sont dans l'équipe ;
+- les **combats de boss** : jusqu'à 8 poireaux d'un même compte contre l'un des trois boss, avec le top 5 de chaque boss
+  au nombre de tours ;
+- l'**arène** (Battle Royale, guerre, chasse au trésor, colosse) : salle d'attente de chaque compte, inscription avec un
+  mode préféré, renouvelée automatiquement tant que le serveur tourne (Leek Wars la fait expirer sinon).
+
+### Tournois
+
+Les tournois récents de vos poireaux, de vos éleveurs et des poireaux suivis, avec le parcours de chacun (manches gagnées,
+élimination), et l'arbre complet de chaque tournoi : vos participants mis en avant, lien vers chaque combat. Les combats
+de vos poireaux sont importés au passage.
+
+### Comptes
+
+Tous vos comptes d'un coup d'œil : combats restants (solo, équipe, Battle Royale), talent, bilan du jour, poireaux et
+inscription au tournoi. **Dépensez les combats restants** de plusieurs comptes en un clic : les combats solo sont répartis
+entre les poireaux de chaque compte dans la limite de Leek Wars par poireau, le reste peut partir en combats éleveur. Le
+plan est affiché et confirmé avant tout lancement.
+
+### Méta par niveau
+
+Ce que jouent les poireaux les mieux classés autour d'un niveau, d'après le classement et les fiches publiques de Leek Wars :
+quartiles de chaque caractéristique avec la position de votre poireau, armes et puces les plus jouées, et ce que la
+majorité équipe et que votre poireau n'a pas.
+
 ### Analyse
 
 Taux de victoire par jour, selon l'écart de niveau ou de talent, la durée, le contexte, le profil de l'adversaire et votre
@@ -195,6 +223,12 @@ piloter l'API. Les clients sans navigateur (curl, scripts) ne sont pas concerné
 | GET · PUT | `/api/ai/settings` | réglages de l'analyse IA (clés masquées, modèles, prompt) · `{provider?, anthropicKey?, openaiKey?, anthropicModel?, openaiModel?, prompt?, includeCode?}` |
 | PATCH | `/api/fights/:id` | `{note?, tags?}` |
 | DELETE | `/api/fights/:id` | retire du stockage local |
+| GET · POST | `/api/compositions` · `/api/opponents/composition/:id` · `/api/fights/team` | compositions de mes comptes · adversaires proposés (`?account=`) · `{compositionId, accountId?, targetId?, strategy?, count?, batch?}` → tâche : combats d'équipe |
+| GET · POST | `/api/bosses` · `/api/fights/boss` | boss et top 5 au nombre de tours · `{bossId, leekIds, count?, batch?}` → tâche : combats de boss (8 poireaux d'un compte au plus) |
+| GET · POST | `/api/arena` · `/api/arena/register` · `/api/arena/leave` | salles d'attente de mes comptes · `{leekId, preference?, keep?}` inscrit (et renouvelle l'inscription) · `{accountId}` quitte |
+| GET | `/api/tournaments` · `/api/tournaments/:id` | tournois récents (parcours : 1 gagné, -1 éliminé, 0 en attente) · arbre d'un tournoi (importe les combats de mes poireaux) |
+| GET · POST | `/api/console` · `/api/console/spend` | tous mes comptes (compteurs, poireaux, bilan du jour, répartition proposée) · `{accountIds?, strategy?, batch?, farmer?}` dépense les combats restants |
+| GET · POST | `/api/meta` | méta en cache (`?level=&spread=`) · `{level, spread?, count?, leekId?}` → tâche : calcul depuis le classement et les fiches publiques |
 | GET | `/api/stats` | agrégats (mêmes filtres que `/api/fights`) |
 | GET | `/api/compare?a=<query>&b=<query>` | compare deux jeux de filtres (ex. avant/après une modif d'IA) |
 | GET · POST | `/api/accounts` | liste des comptes (clés masquées, combats restants) · `{apiKey, activate?}` ajoute un compte (suit ses poireaux, importe son historique) |
