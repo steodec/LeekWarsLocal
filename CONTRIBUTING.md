@@ -11,7 +11,7 @@ s'est passé. Un numéro de combat Leek Wars aide beaucoup pour tout ce qui touc
 **Ne collez jamais une clé API** (Leek Wars, Claude, ChatGPT) dans une issue, un log ou une capture d'écran.
 
 Une faille de sécurité ne se signale pas dans une issue publique : utilisez le
-[signalement privé](https://github.com/steodec/LeekWarsLocal/security/advisories/new).
+[signalement privé](https://github.com/steodec/LeekWarsLocal/security/advisories/new) (voir [SECURITY.md](SECURITY.md)).
 
 ## Mettre en place le projet
 
