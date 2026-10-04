@@ -1,0 +1,29 @@
+name: Idée / amélioration
+description: Proposer une nouvelle fonctionnalité ou une amélioration
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Le besoin
+      description: Qu'est-ce que vous voulez faire et qui est difficile ou impossible aujourd'hui ?
+      placeholder: Quand j'analyse mes combats, j'aimerais…
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Ce que vous proposez
+      description: Comment ça pourrait marcher (écran, bouton, route de l'API…)
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives envisagées
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution
+      options:
+        - label: Je suis prêt·e à proposer une pull request pour ça

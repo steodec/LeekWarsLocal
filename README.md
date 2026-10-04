@@ -225,7 +225,7 @@ curl -s "localhost:3737/api/compare?a=since%3D1790700000%26until%3D1790800000&b=
 
 LeekWars Local est un logiciel libre distribué sous licence [GNU GPL v3](LICENSE) : vous pouvez l'utiliser, l'étudier,
 le modifier et le redistribuer, à condition que les versions modifiées que vous distribuez restent sous la même licence.
-Les contributions (issues, pull requests) sont les bienvenues.
+Les contributions (issues, pull requests) sont les bienvenues : voir [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Crédits
 
