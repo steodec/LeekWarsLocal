@@ -2,6 +2,8 @@
 
 Merci de votre intérêt ! Bugs, idées, corrections, nouvelles analyses : toutes les contributions sont les bienvenues.
 
+En participant, vous vous engagez à respecter le [code de conduite](CODE_OF_CONDUCT.md).
+
 ## Signaler un bug ou proposer une idée
 
 Ouvrez une [issue](https://github.com/steodec/LeekWarsLocal/issues/new/choose) avec le modèle qui correspond.
