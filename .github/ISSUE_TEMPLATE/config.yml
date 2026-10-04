@@ -1,5 +1,8 @@
 blank_issues_enabled: true
 contact_links:
+  - name: Questions et entraide
+    url: https://github.com/steodec/LeekWarsLocal/discussions
+    about: Une question sur l'utilisation, une astuce, un retour d'expérience ? Passez par les Discussions.
   - name: Signaler une faille de sécurité
     url: https://github.com/steodec/LeekWarsLocal/security/advisories/new
     about: En privé, pour ne pas exposer les utilisateurs avant la correction.
