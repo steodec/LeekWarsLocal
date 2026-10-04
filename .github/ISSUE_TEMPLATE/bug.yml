@@ -1,0 +1,70 @@
+name: Bug
+description: Quelque chose ne marche pas comme prévu
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Merci de prendre le temps de signaler ce bug !
+        **Ne collez jamais de clé API** (Leek Wars, Claude, ChatGPT). Une faille de sécurité se signale en
+        [privé](https://github.com/steodec/LeekWarsLocal/security/advisories/new), pas ici.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Paramètres → Mises à jour → « Version installée » (ou le commit si vous lancez le projet en dev)
+      placeholder: "0.6.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Partie concernée
+      options:
+        - Combats (liste, détail, replay, logs)
+        - Analyse IA d'un combat
+        - Lancement de combats / tests d'IA
+        - Statistiques / analyse
+        - Caractéristiques / poireaux suivis
+        - Comptes / paramètres
+        - Installation / mise à jour
+        - API locale
+        - Autre
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Étapes pour reproduire
+      placeholder: |
+        1. Aller sur…
+        2. Cliquer sur…
+        3. …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Ce qui était attendu
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Ce qui s'est passé
+      description: Message d'erreur exact, capture d'écran…
+    validations:
+      required: true
+  - type: input
+    id: fight
+    attributes:
+      label: Numéro de combat (si concerné)
+      description: Le numéro dans l'URL leekwars.com/fight/…
+      placeholder: "53943467"
+  - type: dropdown
+    id: install
+    attributes:
+      label: Mode d'utilisation
+      options:
+        - Application installée (Windows)
+        - Projet en développement (npm run server / dev)
