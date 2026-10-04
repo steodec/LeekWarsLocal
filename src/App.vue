@@ -10,6 +10,9 @@ import Stats from "./views/Stats.vue";
 import Characteristics from "./views/Characteristics.vue";
 import Leeks from "./views/Leeks.vue";
 import Settings from "./views/Settings.vue";
+import Tournaments from "./views/Tournaments.vue";
+import Console from "./views/Console.vue";
+import Meta from "./views/Meta.vue";
 import JobsPanel from "./components/JobsPanel.vue";
 import UpdateBanner from "./components/UpdateBanner.vue";
 import { startUpdateChecks } from "./updater";
@@ -23,6 +26,8 @@ const view = computed(() => {
   const h = hash.value.replace(/^#/, "");
   const fight = h.match(/^\/fight\/(\d+)/);
   if (fight) return { name: "fight", id: Number(fight[1]) };
+  const tournament = h.match(/^\/tournament\/(\d+)/);
+  if (tournament) return { name: "tournament", id: Number(tournament[1]) };
   const name = h.split("?")[0].replace(/^\//, "") || "dashboard";
   return { name, id: 0 };
 });
@@ -32,9 +37,12 @@ const NAV = [
   { key: "dashboard", label: "Tableau de bord", icon: "icon/xp_trophies.png" },
   { key: "launch", label: "Lancer", icon: "icon/xp_garden.png" },
   { key: "fights", label: "Combats", icon: "fight.png", mask: true },
+  { key: "tournaments", label: "Tournois", icon: "icon/trophy.png" },
   { key: "stats", label: "Analyse", icon: "icon/xp_ranking.png" },
+  { key: "meta", label: "Méta", icon: "icon/ranking.png" },
   { key: "characteristics", label: "Caractéristiques", icon: "charac/strength.png" },
   { key: "leeks", label: "Poireaux", icon: "icon/xp_leek.png" },
+  { key: "console", label: "Comptes", icon: "icon/team.png" },
   { key: "settings", label: "Paramètres", icon: "icon/gearing.png", mask: true },
 ];
 
@@ -101,7 +109,7 @@ onMounted(() => {
       <span class="local">Local</span>
     </div>
     <nav>
-      <a v-for="n in NAV" :key="n.key" :href="'#/' + (n.key === 'dashboard' ? '' : n.key)" :class="{ active: view.name === n.key || (n.key === 'fights' && view.name === 'fight') }">
+      <a v-for="n in NAV" :key="n.key" :href="'#/' + (n.key === 'dashboard' ? '' : n.key)" :class="{ active: view.name === n.key || (n.key === 'fights' && view.name === 'fight') || (n.key === 'tournaments' && view.name === 'tournament') }">
         <span v-if="n.mask" class="nav-icon mask" :style="maskStyle(n.icon)" aria-hidden="true"></span>
         <img v-else class="nav-icon" :src="lwImage(n.icon)" alt="" />
         {{ n.label }}
@@ -159,6 +167,9 @@ onMounted(() => {
     <Stats v-else-if="view.name === 'stats'" />
     <Characteristics v-else-if="view.name === 'characteristics'" />
     <Leeks v-else-if="view.name === 'leeks'" />
+    <Tournaments v-else-if="view.name === 'tournaments' || view.name === 'tournament'" :id="view.id" />
+    <Meta v-else-if="view.name === 'meta'" />
+    <Console v-else-if="view.name === 'console'" />
     <Settings v-else-if="view.name === 'settings'" />
     <div v-else class="empty">Page inconnue</div>
   </main>

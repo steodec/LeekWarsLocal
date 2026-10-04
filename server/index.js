@@ -12,6 +12,7 @@ import { Db } from "./db.js";
 import { analyzeFight, ANALYSIS_VERSION, CONTEXTS, TYPES } from "./analyze.js";
 import { computeStats } from "./stats.js";
 import { characteristicsView, CHARACTERISTICS } from "./capital.js";
+import { leekProfile, aggregateMeta } from "./meta.js";
 import { PROVIDERS, DEFAULT_PROMPT, AiError, aiSettings, resolveProvider, formatLogs, fightDigest, collectAiCode, buildUserMessage, runAnalysis, checkKey } from "./ai.js";
 
 // Emplacement des données : le dossier applicatif de l'application de bureau (%APPDATA%\com.steodec.leekwarslocal),
@@ -669,6 +670,262 @@ async function launchTest({ leekId, ais, scenarioIds, count = 1, aiPath }) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Combats d'équipe et de boss
+// ---------------------------------------------------------------------------
+
+/**
+ * Compte qui lance avec la composition `compositionId` (garden/get → my_compositions). Une composition appartient à
+ * l'équipe : plusieurs de mes comptes peuvent la jouer, chacun avec ses combats d'équipe ; `accountId` choisit lequel.
+ */
+async function compositionOwner(compositionId, accountId) {
+  for (const account of db.accounts()) {
+    if (accountId && account.id !== Number(accountId)) continue;
+    try {
+      const { garden } = await clientFor(account).garden();
+      const composition = (garden.my_compositions ?? []).find((c) => c.id === compositionId);
+      if (composition) return { account, client: clientFor(account), composition, garden };
+    } catch (e) {
+      console.warn(`Compositions de ${account.name} indisponibles : ${e.message}`);
+    }
+  }
+  throw new HttpError(404, `Composition #${compositionId} introuvable dans vos comptes`);
+}
+
+async function launchTeam({ compositionId, accountId, targetId, strategy = "weakest", count = 1, batch = false }) {
+  compositionId = Number(compositionId);
+  if (!compositionId) throw new HttpError(400, "compositionId requis");
+  count = clamp(Number(count) || 1, 1, 100);
+  const { account, client, composition, garden } = await compositionOwner(compositionId, accountId);
+  if (garden.team_fights < count) throw new HttpError(409, `Combats d'équipe restants insuffisants sur ${account.name} : ${garden.team_fights} < ${count}`);
+  return createJob("team", { compositionId, composition: composition.name, targetId, strategy, count, batch, account: account.name }, async (job, log) => {
+    job.progress.total = count;
+    const ids = [];
+    if (batch && !targetId) {
+      ids.push(...extractFightIds(await client.startTeamFightBatch(compositionId, count)));
+      for (const id of ids) job.fights.push({ id, opponent: null, result: "pending" });
+      log(`Lot d'équipe lancé : ${ids.length} combat(s)`);
+    }
+    const failure = batch && !targetId ? null : await launchLoop(count, ids, log, async () => {
+      const { id, target } = await startAgainstPicked({
+        targetId, strategy, talent: composition.talent ?? 0, log,
+        fetchOpponents: async () => (await client.compositionOpponents(compositionId)).opponents ?? [],
+        start: (tid) => client.startTeamFight(compositionId, tid),
+      });
+      const name = target.team_name ? `${target.name} [${target.team_name}]` : target.name;
+      job.fights.push({ id, opponent: { id: target.id, name, talent: target.talent }, result: "pending" });
+      log(`Combat d'équipe ${id} lancé : ${composition.name} contre ${name}`);
+      return id;
+    });
+    await waitAndImport(job, log, ids, "launch");
+    if (failure) throw failure;
+  });
+}
+
+async function launchBoss({ bossId, leekIds, count = 1, batch = false }) {
+  bossId = Number(bossId);
+  const participants = [...new Set((leekIds ?? []).map(Number).filter(Boolean))];
+  if (!bossId || !participants.length) throw new HttpError(400, "bossId et leekIds requis");
+  if (participants.length > 8) throw new HttpError(400, "8 poireaux au plus contre un boss");
+  count = clamp(Number(count) || 1, 1, 100);
+  const owners = await Promise.all(participants.map((id) => assertOwned(id)));
+  const { client, account } = owners[0];
+  if (owners.some((o) => o.account.id !== account.id)) throw new HttpError(400, "Les poireaux engagés contre un boss doivent appartenir au même compte");
+  const names = owners.map((o) => o.leek.name).join(", ");
+  return createJob("boss", { bossId, leekIds: participants, count, batch, account: account.name }, async (job, log) => {
+    await ensureFightsLeft(client, count, account.name);
+    job.progress.total = count;
+    const ids = [];
+    if (batch) {
+      ids.push(...extractFightIds(await client.startBossFightBatch(bossId, participants, count)));
+      for (const id of ids) job.fights.push({ id, opponent: null, result: "pending" });
+      log(`Lot de ${ids.length} combat(s) de boss lancé avec ${names}`);
+    }
+    const failure = batch ? null : await launchLoop(count, ids, log, async () => {
+      const [id] = extractFightIds(await client.startBossFight(bossId, participants));
+      job.fights.push({ id, opponent: { id: -bossId, name: `Boss #${bossId}` }, result: "pending" });
+      log(`Combat de boss ${id} lancé avec ${names}`);
+      return id;
+    });
+    await waitAndImport(job, log, ids, "launch");
+    farmerCache.delete(account.id);
+    if (failure) throw failure;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Arène : l'inscription expire (`expires_in`) ; on la renouvelle tant que l'utilisateur ne quitte pas la salle.
+// ---------------------------------------------------------------------------
+
+const arenaKeepAlive = new Map(); // accountId → { leekId, leekName, preference, timer, since, until, lastError }
+const ARENA_MAX_WAIT = 3 * 3600_000;
+
+function stopArenaKeepAlive(accountId) {
+  const k = arenaKeepAlive.get(accountId);
+  if (k) clearTimeout(k.timer);
+  arenaKeepAlive.delete(accountId);
+}
+
+async function registerArena({ leekId, preference = -1, keep = true }) {
+  const { account, client, leek } = await assertOwned(Number(leekId));
+  if (leek.level < 20) throw new HttpError(409, `${leek.name} doit être au moins niveau 20 pour l'arène`);
+  stopArenaKeepAlive(account.id);
+  const res = await client.arenaRegister(leek.id, Number(preference));
+  if (keep) {
+    const entry = { leekId: leek.id, leekName: leek.name, preference: Number(preference), since: Date.now(), until: Date.now() + ARENA_MAX_WAIT, lastError: null, timer: null };
+    const renew = (expiresIn) => {
+      // Renouvelle un peu avant l'expiration ; s'arrête au bout de 3 h ou si Leek Wars refuse (arène lancée, poireau en combat…).
+      entry.timer = setTimeout(async () => {
+        if (Date.now() > entry.until) return stopArenaKeepAlive(account.id);
+        try {
+          const r = await client.arenaRegister(entry.leekId, entry.preference);
+          renew(r.expires_in);
+        } catch (e) {
+          entry.lastError = e.body?.error ?? e.message;
+          console.warn(`Arène (${account.name}) : renouvellement arrêté, ${entry.lastError}`);
+          arenaKeepAlive.delete(account.id);
+        }
+      }, Math.max(20, (Number(expiresIn) || 300) - 30) * 1000);
+    };
+    arenaKeepAlive.set(account.id, entry);
+    renew(res.expires_in);
+  }
+  return res;
+}
+
+// ---------------------------------------------------------------------------
+// Tournois : chaque poireau (leek/get) et éleveur liste ses tournois récents avec son parcours
+// (`rounds` : 1 manche gagnée, -1 éliminé, 0 en attente). Les tournois terminés sont mis en cache.
+// ---------------------------------------------------------------------------
+
+const ROUND_LABELS = {
+  sixtyfourths: "Soixante-quatrièmes", thirtyseconds: "Trente-deuxièmes", sixteenths: "Seizièmes", eighths: "Huitièmes",
+  quarters: "Quarts de finale", semifinals: "Demi-finales", finals: "Finale", final: "Finale",
+};
+
+async function tournamentData(id) {
+  const cached = db.get(`tournament:${id}`);
+  if (cached) return cached;
+  const res = await publicLw.tournament(id);
+  const t = res.tournament ?? res;
+  if (t.finished) db.set(`tournament:${id}`, t);
+  return t;
+}
+
+function parcours(rounds) {
+  const r = rounds ?? [];
+  const status = r.includes(-1) ? "eliminated" : r.includes(0) || !r.length ? "running" : "qualified";
+  return { rounds: r, wins: r.filter((x) => x === 1).length, status };
+}
+
+/** Tournois récents de mes éleveurs et de mes poireaux (et des poireaux suivis). */
+async function myTournaments() {
+  const out = [];
+  for (const { farmer: f } of await allFarmers()) {
+    for (const t of f.tournaments ?? []) {
+      out.push({ id: t.id, date: t.date, kind: "farmer", entity: { id: f.id, name: f.name, mine: true }, ...parcours(t.rounds?.[f.id]) });
+    }
+  }
+  for (const t of db.trackedLeeks()) {
+    try {
+      const l = await publicLeek(t.id);
+      for (const x of l.tournaments ?? []) {
+        out.push({ id: x.id, date: x.date, kind: "solo", entity: { id: l.id, name: l.name, mine: !!t.owned }, ...parcours(x.rounds?.[l.id]) });
+      }
+    } catch (e) {
+      console.warn(`Tournois de ${t.name} indisponibles : ${e.message}`);
+    }
+  }
+  return out.sort((a, b) => b.date - a.date || a.entity.name.localeCompare(b.entity.name));
+}
+
+/** Arbre d'un tournoi ; mes participants sont marqués, et leurs combats terminés importés en arrière-plan. */
+async function tournamentView(id) {
+  const t = await tournamentData(id);
+  const fids = myFarmerIds();
+  const tracked = new Map(db.trackedLeeks().map((l) => [l.id, l]));
+  const isMine = (c) => (t.type === "farmer" ? fids.has(c.id) : t.type === "solo" ? !!tracked.get(c.id)?.owned : fids.has(c.farmer_id));
+  const toImport = [];
+  const rounds = Object.entries(t.rounds ?? {}).map(([key, matches]) => ({
+    key,
+    label: ROUND_LABELS[key] ?? key,
+    matches: (matches ?? []).map((m) => {
+      const fightId = Number(String(m?.fight ?? "").match(/\/fight\/(\d+)/)?.[1]) || null;
+      // Places pas encore attribuées (manches à venir) : null.
+      const contestants = (m?.contestants ?? []).map((c) => {
+        if (!c) return null;
+        const named = String(c.name ?? "").match(/^(.*) \((\d+)\)$/);
+        return {
+          id: c.id, name: named ? named[1] : c.name, level: named ? Number(named[2]) : null, win: !!c.win,
+          mine: isMine(c), tracked: tracked.has(c.id), farmerId: c.farmer_id ?? null,
+        };
+      });
+      if (fightId && contestants.some((c) => c?.mine || c?.tracked) && !db.hasFight(fightId)) toImport.push(fightId);
+      return { fightId, contestants };
+    }),
+  }));
+  if (toImport.length) {
+    (async () => {
+      for (const fid of toImport) await importFight(fid, { source: "tournament" }).catch(() => {});
+    })();
+  }
+  return {
+    id: t.id, type: t.type, date: t.date, finished: !!t.finished, size: t.size, currentRound: t.current_round ?? null,
+    nextRound: t.next_round ?? null, rounds, importing: toImport.length, url: `https://leekwars.com/tournament/${t.id}`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Méta par niveau (classement public + profils publics, mis en cache 12 h)
+// ---------------------------------------------------------------------------
+
+const META_TTL = 12 * 3600_000;
+
+async function cachedPublicLeek(id) {
+  const key = `publicLeek:${id}`;
+  const cached = db.get(key);
+  if (cached && Date.now() - cached.at < META_TTL) return cached.leek;
+  const leek = await publicLeek(id);
+  db.set(key, { at: Date.now(), leek });
+  return leek;
+}
+
+function launchMeta({ level, spread = 10, count = 30, leekId }) {
+  if (!Number(level)) throw new HttpError(400, "level requis");
+  level = clamp(Number(level), 1, 301);
+  spread = clamp(Number(spread) || 10, 0, 100);
+  count = clamp(Number(count) || 30, 5, 60);
+  return createJob("meta", { level, spread, count, leekId: leekId ? Number(leekId) : null }, async (job, log) => {
+    // Classement « level-N » : poireaux de niveau ≤ N triés par talent ; on garde ceux proches de N.
+    const picked = [];
+    for (let page = 1; page <= 20 && picked.length < count; page++) {
+      const { ranking, pages } = await publicLw.ranking(`level-${level}`, "talent", page);
+      for (const r of ranking ?? []) if (r.level >= level - spread && picked.length < count) picked.push(r);
+      log(`Classement niveau ≤ ${level}, page ${page} : ${picked.length}/${count} poireau(x) entre les niveaux ${level - spread} et ${level}`);
+      if (!ranking?.length || page >= (pages ?? 1)) break;
+    }
+    job.progress.total = picked.length;
+    const cat = await getCatalog();
+    const profiles = [];
+    for (const r of picked) {
+      try {
+        profiles.push({ ...leekProfile(await cachedPublicLeek(r.id), cat), rank: r.rank, country: r.country ?? null });
+      } catch (e) {
+        log(`Profil de ${r.name} indisponible : ${e.message}`);
+      }
+      job.progress.done++;
+    }
+    let mine = null;
+    if (job.params.leekId) {
+      const o = await ownerOf(job.params.leekId);
+      const raw = o ? await privateLeek(o.client, job.params.leekId) : await publicLeek(job.params.leekId);
+      mine = leekProfile(raw, cat);
+    }
+    db.set(`meta:${level}:${spread}`, { at: Date.now(), level, spread, count: profiles.length, leeks: profiles, mine, ...aggregateMeta(profiles, mine) });
+    log(`Méta du niveau ${level} calculée sur ${profiles.length} poireau(x)`);
+  });
+}
+
 let syncJob = null;
 async function sync({ leekIds, limit = 500, farmerFights = true } = {}) {
   if (syncJob && syncJob.status === "running") return syncJob;
@@ -1241,6 +1498,179 @@ route("DELETE", "/api/fights/:id/ai-analysis/:aid", "Supprime une analyse IA d'u
   if (!db.removeAiAnalysis(Number(params.id), Number(params.aid))) throw new HttpError(404, "Analyse introuvable");
   return { ok: true };
 });
+
+// ---------------------------------------------------------------------------
+// Tournois
+// ---------------------------------------------------------------------------
+
+route("GET", "/api/tournaments", "Tournois récents de mes éleveurs, de mes poireaux et des poireaux suivis, avec leur parcours (rounds : 1 gagné, -1 éliminé, 0 en attente)", async () => ({
+  tournaments: await myTournaments(),
+}));
+
+route("GET", "/api/tournaments/:id", "Arbre d'un tournoi (manches, combats, participants ; mine = à moi). Importe en arrière-plan les combats terminés de mes poireaux et des poireaux suivis", async ({ params }) =>
+  tournamentView(Number(params.id)));
+
+// ---------------------------------------------------------------------------
+// Boss et arène
+// ---------------------------------------------------------------------------
+
+route("GET", "/api/bosses", "Boss (niveau, arme) et top 5 de leur classement au nombre de tours", async () => {
+  const { bosses } = await publicLw.bosses();
+  return {
+    bosses: await Promise.all((bosses ?? []).map(async (b) => {
+      let top = [];
+      try {
+        top = ((await publicLw.bossRanking(b.id, 1, 1)).ranking ?? []).slice(0, 5)
+          .map((r) => ({ rank: r.rank, farmer: r.name, turns: r.turns, leeks: r.leeks, levels: r.levels, fight: r.fight }));
+      } catch (e) {
+        console.warn(`Classement du boss ${b.id} indisponible : ${e.message}`);
+      }
+      return { id: b.id, name: b.name, label: String(b.name).replace(/_/g, " "), level: b.level, top };
+    })),
+  };
+});
+
+route("POST", "/api/fights/boss", "Combats contre un boss avec mes poireaux (même compte, 8 max ; consomme les combats du jour). Body : {bossId, leekIds, count?, batch? (Leek Wars+)}", async ({ body }) =>
+  jobView(await launchBoss(body)));
+
+route("GET", "/api/arena", "Salle d'attente des arènes pour chacun de mes comptes (inscrits, décompte, modes) et renouvellement automatique de l'inscription", async () => {
+  const out = [];
+  for (const account of db.accounts()) {
+    const keep = arenaKeepAlive.get(account.id);
+    try {
+      const a = await clientFor(account).arena();
+      out.push({
+        accountId: account.id, accountName: account.name, registered: !!a.registered, count: a.count, countdown: a.countdown,
+        minPlayers: a.min_players, maxPlayers: a.max_players, minLevel: a.min_level, modes: a.modes,
+        leeks: Object.values(a.leeks ?? {}).map((l) => ({ id: l.id, name: l.name, level: l.level, talent: l.talent, skin: l.skin, hat: l.hat, metal: l.metal, face: l.face, preference: l.preference })),
+        keepAlive: keep ? { leekId: keep.leekId, leekName: keep.leekName, preference: keep.preference, since: keep.since } : null,
+      });
+    } catch (e) {
+      out.push({ accountId: account.id, accountName: account.name, error: e.message });
+    }
+  }
+  return { arenas: out };
+});
+
+route("POST", "/api/arena/register", "Inscrit un de mes poireaux (niveau 20+) dans la salle d'attente des arènes. Body : {leekId, preference? (-1 suivre les autres, -2 tous les modes, 0 BR, 1 guerre, 2 chasse au trésor, 3 colosse), keep? (renouvelle l'inscription jusqu'à 3 h)}", async ({ body }) =>
+  registerArena(body));
+
+route("POST", "/api/arena/leave", "Retire un compte de la salle d'attente des arènes. Body : {accountId}", async ({ body }) => {
+  const account = accountOrActive(body.accountId);
+  stopArenaKeepAlive(account.id);
+  await clientFor(account).arenaLeave();
+  return { ok: true };
+});
+
+// ---------------------------------------------------------------------------
+// Équipe
+// ---------------------------------------------------------------------------
+
+route("GET", "/api/compositions", "Compositions d'équipe de mes comptes, avec les combats d'équipe restants", async () => {
+  const out = [];
+  for (const account of db.accounts()) {
+    try {
+      const { garden } = await clientFor(account).garden();
+      for (const c of garden.my_compositions ?? []) {
+        out.push({
+          id: c.id, name: c.name, team: c.team_name, teamId: c.team_id, level: c.level, totalLevel: c.total_level, talent: c.talent, leekCount: c.leek_count,
+          accountId: account.id, accountName: account.name, teamFights: garden.team_fights, maxTeamFights: garden.max_team_fights,
+        });
+      }
+    } catch (e) {
+      console.warn(`Compositions de ${account.name} indisponibles : ${e.message}`);
+    }
+  }
+  return { compositions: out };
+});
+
+route("GET", "/api/opponents/composition/:id", "Compositions adverses proposées pour une de mes compositions. Query : account? (compte qui la joue)", async ({ params, query }) => {
+  const { client } = await compositionOwner(Number(params.id), query.account);
+  const { opponents } = await client.compositionOpponents(Number(params.id));
+  return {
+    opponents: (opponents ?? []).map((o) => ({ id: o.id, name: o.name, team: o.team_name, teamId: o.team_id, level: o.level, totalLevel: o.total_level, talent: o.talent, leekCount: o.leek_count })),
+  };
+});
+
+route("POST", "/api/fights/team", "Lancer des combats d'équipe (consomme les combats d'équipe du jour). Body : {compositionId, accountId? (compte qui la joue), targetId?, strategy?: weakest|strongest|closest|random, count?, batch? (Leek Wars+)}", async ({ body }) =>
+  jobView(await launchTeam(body)));
+
+// ---------------------------------------------------------------------------
+// Console multi-comptes
+// ---------------------------------------------------------------------------
+
+/** Répartition des combats restants d'un compte entre ses poireaux (plafond par poireau : max_solo_fights). */
+function spendPlan(farmer, garden) {
+  const leeks = Object.values(farmer.leeks ?? {}).sort((a, b) => a.id - b.id);
+  const done = (id) => Number(garden.solo_fights?.[id] ?? 0);
+  const cap = (l) => Math.max(0, (garden.max_solo_fights ?? Infinity) - done(l.id));
+  let left = garden.fights;
+  const plan = leeks.map((l) => ({ leekId: l.id, name: l.name, level: l.level, count: 0, cap: cap(l) }));
+  // Tour à tour, un combat par poireau tant qu'il en reste et que le plafond le permet.
+  while (left > 0 && plan.some((p) => p.count < p.cap)) {
+    for (const p of plan) if (left > 0 && p.count < p.cap) (p.count++, left--);
+  }
+  return { leeks: plan, unassigned: left };
+}
+
+route("GET", "/api/console", "Vue de tous mes comptes : combats restants (solo, équipe, BR), talent, poireaux, tournoi, bilan du jour et répartition proposée des combats restants", async () => {
+  const startOfDay = Math.floor(new Date().setHours(0, 0, 0, 0) / 1000);
+  const out = [];
+  for (const account of db.accounts()) {
+    try {
+      const f = await farmerOf(account);
+      const { garden } = await clientFor(account).garden();
+      const today = db.summaries(`f${account.id}`, { since: startOfDay });
+      out.push({
+        id: account.id, name: f.name, active: account.id === activeFarmerId(), talent: f.talent, lwplus: !!f.lwplus,
+        garden: {
+          fights: garden.fights, maxFights: garden.max_fights, teamFights: garden.team_fights, maxTeamFights: garden.max_team_fights,
+          brFights: garden.battle_royale_fights, maxBrFights: garden.max_battle_royale_fights, maxSoloPerLeek: garden.max_solo_fights ?? null,
+        },
+        tournamentRegistered: !!f.tournament?.registered,
+        leeks: Object.values(f.leeks ?? {}).map((l) => ({ ...leekView(l), inGarden: l.in_garden ?? null })),
+        today: { fights: today.length, wins: today.filter((x) => x.result === "win").length, losses: today.filter((x) => x.result === "loss").length },
+        plan: spendPlan(f, garden),
+      });
+    } catch (e) {
+      out.push({ id: account.id, name: account.name, error: e.message });
+    }
+  }
+  return { accounts: out };
+});
+
+route("POST", "/api/console/spend", "Dépense les combats restants des comptes choisis : combats solo répartis entre leurs poireaux, puis le reste (plafond solo atteint) en combats éleveur si farmer (consomme les combats du jour, sur demande explicite). Body : {accountIds?: (tous par défaut), strategy?, batch?, farmer?}", async ({ body }) => {
+  const ids = body.accountIds?.length ? new Set(body.accountIds.map(Number)) : null;
+  const strategy = body.strategy ?? "weakest";
+  const jobsOut = [];
+  for (const account of db.accounts()) {
+    if (ids && !ids.has(account.id)) continue;
+    const f = await farmerOf(account, true);
+    const { garden } = await clientFor(account).garden();
+    const plan = spendPlan(f, garden);
+    for (const p of plan.leeks) {
+      if (!p.count) continue;
+      jobsOut.push(jobView(await launchSolo({ leekId: p.leekId, strategy, count: p.count, batch: !!body.batch })));
+    }
+    if (body.farmer && plan.unassigned > 0) {
+      jobsOut.push(jobView(launchFarmer({ accountId: account.id, strategy, count: plan.unassigned, batch: !!body.batch })));
+    }
+  }
+  return { jobs: jobsOut };
+});
+
+// ---------------------------------------------------------------------------
+// Méta par niveau
+// ---------------------------------------------------------------------------
+
+route("GET", "/api/meta", "Méta calculée (dernier calcul en cache) : poireaux du haut du classement autour d'un niveau, quartiles des caractéristiques, armes et puces les plus jouées. Query : level, spread?", ({ query }) => {
+  const level = Number(query.level);
+  if (!level) throw new HttpError(400, "level requis");
+  return db.get(`meta:${level}:${clamp(Number(query.spread) || 10, 0, 100)}`) ?? null;
+});
+
+route("POST", "/api/meta", "Calcule la méta d'un niveau (tâche de fond : classement public + profils publics, en cache 12 h). Body : {level, spread? (10), count? (30), leekId? (mon poireau à comparer)}", ({ body }) =>
+  jobView(launchMeta(body)));
 
 route("PATCH", "/api/fights/:id", "Annoter un combat. Body : {note?, tags?}", ({ params, body }) => {
   const s = db.annotate(Number(params.id), body);
